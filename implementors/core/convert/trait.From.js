@@ -1,0 +1,3 @@
+(function() {var implementors = {};
+implementors["lockdown"] = [{"text":"impl From&lt;UserStatus&gt; for i32","synthetic":false,"types":[]},{"text":"impl From&lt;ActionType&gt; for i32","synthetic":false,"types":[]},{"text":"impl From&lt;ActionPresentation&gt; for i32","synthetic":false,"types":[]},{"text":"impl From&lt;FieldPresentation&gt; for i32","synthetic":false,"types":[]}];
+if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
