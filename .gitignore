@@ -1,2 +1,12 @@
+# Rust
 /target
 Cargo.lock
+**/*.rs.bk
+
+# Nix
+/result*
+/nix/result*
+
+# Direnv
+/.direnv
+/.envrc
