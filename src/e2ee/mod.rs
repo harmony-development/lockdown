@@ -1,14 +1,14 @@
-use std::{collections::HashMap};
-use prost::DecodeError;
-use rand::rngs::OsRng;
-use ed25519_dalek::Keypair;
+use self::aes::HarmonyAes;
+use crate::api::secret;
 
+use std::collections::HashMap;
 use std::rc::Rc;
 
-mod aes;
-use self::aes::HarmonyAes;
+use ed25519_dalek::Keypair;
+use prost::DecodeError;
+use rand::rngs::OsRng;
 
-use crate::api::secret;
+mod aes;
 
 pub trait Impure {
     fn store_private_key(&mut self, data: &[u8; 32]);
@@ -17,9 +17,9 @@ pub trait Impure {
 
 pub struct E2EEClient {
     impure: Box<dyn Impure>,
-    stream_states: HashMap<(String,String),Rc<StreamState>>,
-    message_stream_states: HashMap<String,Rc<StreamState>>,
-    state_stream_states: HashMap<String,Rc<StreamState>>,
+    stream_states: HashMap<(String, String), Rc<StreamState>>,
+    message_stream_states: HashMap<String, Rc<StreamState>>,
+    state_stream_states: HashMap<String, Rc<StreamState>>,
     keypair: Keypair,
 }
 
@@ -30,7 +30,7 @@ struct StreamState {
     state_id: String,
     state_key: HarmonyAes,
 
-    known_users: Vec<u64>
+    known_users: Vec<u64>,
 }
 
 pub enum StreamKind {
@@ -39,11 +39,12 @@ pub enum StreamKind {
 }
 
 impl E2EEClient {
-    pub fn new_with_new_data(mut impure: Box<dyn Impure>, password: String) -> Self {
-        let mut csprng = OsRng{};
+    /// Creates a new [`E2EEClient`].
+    pub fn new(mut impure: Box<dyn Impure>, password: &[u8]) -> Self {
+        let mut csprng = OsRng {};
         let keypair = Keypair::generate(&mut csprng);
 
-        let cipher = HarmonyAes::new_from_pass(password);
+        let cipher = HarmonyAes::from_pass(password);
         let data = cipher.encrypt_fixed(*keypair.secret.as_bytes());
 
         impure.store_private_key(&data);
@@ -57,13 +58,22 @@ impl E2EEClient {
             keypair,
         }
     }
-    pub fn new_from_existing_data(impure: Box<dyn Impure>, pubkey: [u8; 32], privkey: [u8; 32], password: String) -> Self {
+
+    /// Creates a new [`E2EEClient`] using existing data.
+    pub fn from_existing(
+        impure: Box<dyn Impure>,
+        pubkey: [u8; 32],
+        privkey: [u8; 32],
+        password: &[u8],
+    ) -> Self {
         let keypair = {
-            let cipher = HarmonyAes::new_from_pass(password);
+            let cipher = HarmonyAes::from_pass(password);
             let decrypted = cipher.decrypt_fixed(privkey);
 
-            let pubkey = ed25519_dalek::PublicKey::from_bytes(&pubkey).expect("");
-            let privkey = ed25519_dalek::SecretKey::from_bytes(&decrypted).expect("");
+            let pubkey = ed25519_dalek::PublicKey::from_bytes(&pubkey)
+                .expect("Failed to create public key from bytes");
+            let privkey = ed25519_dalek::SecretKey::from_bytes(&decrypted)
+                .expect("Failed to create private key from bytes");
 
             Keypair {
                 public: pubkey,
@@ -79,10 +89,14 @@ impl E2EEClient {
         }
     }
 
-    pub fn prepare_channel_keys(&mut self, messages: String, state: String) -> ([u8; 32], [u8; 32]) {
+    pub fn prepare_channel_keys(
+        &mut self,
+        messages: String,
+        state: String,
+    ) -> ([u8; 32], [u8; 32]) {
         use rand::RngCore;
 
-        let mut csprng = OsRng{};
+        let mut csprng = OsRng {};
 
         let mut messages_key = [0u8; 32];
         let mut state_key = [0u8; 32];
@@ -92,37 +106,37 @@ impl E2EEClient {
 
         let data: Rc<StreamState> = StreamState {
             messages_id: messages.clone(),
-            messages_key: HarmonyAes::new_from_key(messages_key),
+            messages_key: HarmonyAes::from_key(messages_key),
 
             state_id: state.clone(),
-            state_key: HarmonyAes::new_from_key(state_key),
+            state_key: HarmonyAes::from_key(state_key),
 
             known_users: Vec::new(),
-        }.into();
+        }
+        .into();
 
-        self.stream_states.insert(
-            (messages.clone(), state.clone()),
-            data.clone(),
-        );
-        self.message_stream_states.insert(messages.clone(), data.clone());
-        self.state_stream_states.insert(state.clone(), data.clone());
+        self.stream_states
+            .insert((messages.clone(), state.clone()), data.clone());
+        self.message_stream_states.insert(messages, data.clone());
+        self.state_stream_states.insert(state, data);
 
         (messages_key, state_key)
     }
 
-    pub fn handle_message(&mut self, kind: StreamKind, stream_id: String, data: Vec<u8>) -> Result<(u64, u64, Vec<u8>), DecodeError> {
+    pub fn handle_message(
+        &mut self,
+        kind: StreamKind,
+        stream_id: String,
+        data: Vec<u8>,
+    ) -> Result<(u64, u64, Vec<u8>), DecodeError> {
         use prost::Message;
 
         let mut msg: secret::EncryptedMessage = Default::default();
         msg.merge(data.as_slice())?;
 
         let state = match kind {
-            StreamKind::Message => {
-                &self.message_stream_states[&stream_id].messages_key
-            },
-            StreamKind::State => {
-                &self.state_stream_states[&stream_id].state_key
-            }
+            StreamKind::Message => &self.message_stream_states[&stream_id].messages_key,
+            StreamKind::State => &self.state_stream_states[&stream_id].state_key,
         };
 
         let decrypted = state.decrypt(msg.message);

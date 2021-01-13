@@ -1,20 +1,26 @@
-use aes::cipher::{generic_array::GenericArray, BlockCipher, NewBlockCipher};
-use aes::Aes256;
 use std::convert::TryInto;
-use block_modes::{BlockMode, Ecb};
-use block_modes::block_padding::Pkcs7;
 
-use aes::cipher::generic_array::typenum::bit::B0;
-use aes::cipher::generic_array::typenum::bit::B1;
-use aes::cipher::generic_array::typenum::UInt;
-use aes::cipher::generic_array::typenum::UTerm;
-
-type BlockSize = UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>;
+use aes::{
+    cipher::{
+        generic_array::{
+            typenum::{
+                bit::{B0, B1},
+                UInt, UTerm,
+            },
+            GenericArray,
+        },
+        BlockCipher, NewBlockCipher,
+    },
+    Aes256,
+};
+use block_modes::{block_padding::Pkcs7, BlockMode, Ecb};
 use hmac::{Hmac, Mac, NewMac};
-
 use sha3::Sha3_256;
-type HmacSha256 = Hmac<Sha3_256>;
 
+type U8Array<Size> = GenericArray<u8, Size>;
+type BlockSize = UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>;
+
+type HmacSha256 = Hmac<Sha3_256>;
 type Aes256Ecb = Ecb<Aes256, Pkcs7>;
 
 pub struct HarmonyAes {
@@ -23,26 +29,10 @@ pub struct HarmonyAes {
 }
 
 impl HarmonyAes {
-    pub fn new_from_key(key: [u8; 32]) -> Self {
+    /// Creates a new [`HarmonyAes`] from a key.
+    pub fn from_key(key: [u8; 32]) -> Self {
         let arr = GenericArray::from_slice(&key);
-
-        let blank: aes::cipher::generic_array::GenericArray::<u8, aes::cipher::generic_array::typenum::UTerm> = Default::default();
-
-        let cipher = Aes256::new(&arr);
-        let varlen = Aes256Ecb::new(cipher.clone(), &blank);
-
-        HarmonyAes {
-            aes: cipher,
-            aes_varlen: varlen,
-        }
-    }
-    pub fn new_from_pass(password: String) -> Self {
-        let mac = HmacSha256::new_varkey(password.as_bytes())
-            .expect("somehow the key was invalid length");
-        let password_hash: &[u8] = &mac.finalize().into_bytes();
-        let arr = GenericArray::from_slice(password_hash);
-
-        let blank: aes::cipher::generic_array::GenericArray::<u8, aes::cipher::generic_array::typenum::UTerm> = Default::default();
+        let blank = U8Array::<UTerm>::default();
 
         let cipher = Aes256::new(&arr);
         let varlen = Aes256Ecb::new(cipher.clone(), &blank);
@@ -53,27 +43,98 @@ impl HarmonyAes {
         }
     }
 
+    /// Creates a new [`HarmonyAes`] from a password.
+    pub fn from_pass(password: &[u8]) -> Self {
+        let mac = HmacSha256::new_varkey(password).expect("somehow the key was invalid length");
+        let password_hash = mac.finalize().into_bytes();
+
+        Self::from_key(password_hash.try_into().unwrap())
+    }
+
+    /// Encrypt some data.
     pub fn encrypt(&self, data: Vec<u8>) -> Vec<u8> {
         let cipher = self.aes_varlen.clone();
         cipher.encrypt_vec(&data)
     }
-    
+
+    /// Decrypt some data.
     pub fn decrypt(&self, data: Vec<u8>) -> Vec<u8> {
         let cipher = self.aes_varlen.clone();
-        cipher.encrypt_vec(&data)
+        cipher.decrypt_vec(&data).expect("Block mode error?")
     }
 
     pub fn encrypt_fixed(&self, data: [u8; 32]) -> [u8; 32] {
-        let mut block = GenericArray::<u8, BlockSize>::clone_from_slice(&data);
+        let mut block = U8Array::<BlockSize>::clone_from_slice(&data);
         self.aes.encrypt_block(&mut block);
 
-        block.as_slice().try_into().expect("")
+        block
+            .as_slice()
+            .try_into()
+            .expect("Failed to convert encrypted block into [u8; 32]")
     }
 
     pub fn decrypt_fixed(&self, data: [u8; 32]) -> [u8; 32] {
-        let mut block = GenericArray::<u8, BlockSize>::clone_from_slice(&data);
+        let mut block = U8Array::<BlockSize>::clone_from_slice(&data);
         self.aes.decrypt_block(&mut block);
 
-        block.as_slice().try_into().expect("")
+        block
+            .as_slice()
+            .try_into()
+            .expect("Failed to convert decrypted block into [u8; 32]")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const KEY: [u8; 32] = [0; 32];
+    const PASS: &str = "strong password";
+
+    const UNENCRYPTED: [u8; 32] = [0; 32];
+    const ENCRYPTED: [u8; 48] = [
+        220, 149, 192, 120, 162, 64, 137, 137, 173, 72, 162, 20, 146, 132, 32, 135, 220, 149, 192,
+        120, 162, 64, 137, 137, 173, 72, 162, 20, 146, 132, 32, 135, 31, 120, 143, 230, 216, 108,
+        49, 117, 73, 105, 127, 191, 12, 7, 250, 67,
+    ];
+
+    #[test]
+    fn from_key() {
+        HarmonyAes::from_key(KEY);
+    }
+
+    #[test]
+    fn from_pass() {
+        HarmonyAes::from_pass(PASS.as_bytes());
+    }
+
+    #[test]
+    fn encrypt() {
+        let aes = HarmonyAes::from_key(KEY);
+        let encrypted = aes.encrypt(UNENCRYPTED.to_vec());
+        assert_eq!(ENCRYPTED.to_vec(), encrypted)
+    }
+
+    #[test]
+    fn decrypt() {
+        let aes = HarmonyAes::from_key(KEY);
+        let decrypted = aes.decrypt(ENCRYPTED.to_vec());
+        assert_eq!(UNENCRYPTED.to_vec(), decrypted)
+    }
+
+    #[test]
+    fn encrypt_decrypt() {
+        let aes = HarmonyAes::from_key(KEY);
+        let encrypted = aes.encrypt(UNENCRYPTED.to_vec());
+        let unencrypted = aes.decrypt(encrypted);
+        assert_eq!(UNENCRYPTED.to_vec(), unencrypted)
+    }
+
+    #[test]
+    fn decrypt_encrypt() {
+        let aes = HarmonyAes::from_key(KEY);
+        let unencrypted = aes.decrypt(ENCRYPTED.to_vec());
+        let encrypted = aes.encrypt(unencrypted);
+        assert_eq!(ENCRYPTED.to_vec(), encrypted)
     }
 }

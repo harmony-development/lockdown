@@ -1,4 +1,2 @@
 #[test]
-fn create_client() {
-
-}
+fn create_client() {}
