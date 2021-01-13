@@ -53,12 +53,12 @@ impl HarmonyAes {
         }
     }
 
-    pub fn encrypt(&mut self, data: Vec<u8>) -> Vec<u8> {
+    pub fn encrypt(&self, data: Vec<u8>) -> Vec<u8> {
         let cipher = self.aes_varlen.clone();
         cipher.encrypt_vec(&data)
     }
     
-    pub fn decrypt(&mut self, data: Vec<u8>) -> Vec<u8> {
+    pub fn decrypt(&self, data: Vec<u8>) -> Vec<u8> {
         let cipher = self.aes_varlen.clone();
         cipher.encrypt_vec(&data)
     }
