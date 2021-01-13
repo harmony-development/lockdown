@@ -9,3 +9,12 @@ license = "MIT"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+hmac = "0.10.1"
+sha3 = "0.9.1"
+ed25519-dalek = "1.0.1"
+prost = "0.7"
+prost-types = "0.7"
+
+[build-dependencies]
+prost-build = { version = "0.7" }
+
