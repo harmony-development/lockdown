@@ -2,11 +2,11 @@ fn main() {
     let mut config = prost_build::Config::new();
     config.compile_protos(
         &[
-            "secret/secret.proto",
-            "secret/state.proto",
-            "secret/keys.proto",
-            "secret/encrypted.proto",
-            "secret/messages.proto",
+            "secret/v1/secret.proto",
+            "secret/v1/state.proto",
+            "secret/v1/keys.proto",
+            "secret/v1/encrypted.proto",
+            "secret/v1/messages.proto",
         ],
         &[
             "src/protocol",
