@@ -7,7 +7,7 @@ use std::{cell::{RefCell}, collections::HashMap};
 
 struct TestImpureServer {
     private_keys: HashMap<u64, Vec<u8>>,
-    public_keys: HashMap<u64, [u8; 32]>,
+    public_keys: HashMap<u64, String>,
     channels: HashMap<String, Vec<Vec<u8>>>,
 }
 
@@ -23,7 +23,7 @@ impl TestImpureServer {
     fn store_private_key(&mut self, id: u64, key: Vec<u8>) {
         self.private_keys.insert(id, key);
     }
-    fn publish_public_key(&mut self, id: u64, key: [u8; 32]) {
+    fn publish_public_key(&mut self, id: u64, key: String) {
         self.public_keys.insert(id, key);
     }
 
@@ -66,8 +66,12 @@ impl Impure for TestImpure {
     fn store_private_key(&mut self, data: Vec<u8>) {
         self.server.borrow_mut().store_private_key(self.uid, data);
     }
-    fn publish_public_key(&mut self, data: &[u8; 32]) {
-        self.server.borrow_mut().publish_public_key(self.uid, *data);
+    fn publish_public_key(&mut self, data: String) {
+        self.server.borrow_mut().publish_public_key(self.uid, data);
+    }
+
+    fn get_public_key_for_user(&mut self, uid: u64) -> String {
+        todo!()
     }
 }
 

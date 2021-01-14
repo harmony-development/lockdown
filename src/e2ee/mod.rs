@@ -1,6 +1,6 @@
 use anyhow::anyhow;
 use anyhow::Result;
-use ed25519_dalek::Keypair;
+use rsa::{PublicKey, RSAPrivateKey, PaddingScheme, PrivateKeyPemEncoding, PublicKeyPemEncoding};
 use rand::rngs::OsRng;
 use std::{cell::RefMut, collections::HashMap, convert::TryInto};
 
@@ -17,7 +17,9 @@ mod aes;
 
 pub trait Impure {
     fn store_private_key(&mut self, data: Vec<u8>);
-    fn publish_public_key(&mut self, data: &[u8; 32]);
+
+    fn publish_public_key(&mut self, data: String);
+    fn get_public_key_for_user(&mut self, uid: u64) -> String;
 }
 
 pub struct E2EEClient {
@@ -25,7 +27,7 @@ pub struct E2EEClient {
     stream_states: HashMap<(String, String), Poki<StreamState>>,
     message_stream_states: HashMap<String, Poki<StreamState>>,
     state_stream_states: HashMap<String, Poki<StreamState>>,
-    keypair: Keypair,
+    key: RSAPrivateKey,
     uid: u64,
 }
 
@@ -47,52 +49,47 @@ pub enum StreamKind {
 impl E2EEClient {
     pub fn new_with_new_data(mut impure: Box<dyn Impure>, uid: u64, password: String) -> Self {
         let mut csprng = OsRng {};
-        let keypair = Keypair::generate(&mut csprng);
+        let bits = 4098;
+
+        let priv_key = RSAPrivateKey::new(&mut csprng, bits).expect("failed to generate key");
+        let data: String = priv_key.to_pem_pkcs8().expect("failed to pem key");
 
         let cipher = HarmonyAes::from_pass(password.as_bytes());
-        let data = cipher.encrypt((*keypair.secret.as_bytes()).into());
+        let data = cipher.encrypt((data.as_bytes()).into());
 
         impure.store_private_key(data);
-        impure.publish_public_key(keypair.public.as_bytes());
+        impure.publish_public_key(priv_key.to_public_key().to_pem_pkcs8().expect("failed to pem key"));
 
         E2EEClient {
             impure,
             stream_states: HashMap::new(),
             message_stream_states: HashMap::new(),
             state_stream_states: HashMap::new(),
-            keypair,
+            key: priv_key,
             uid,
         }
     }
     pub fn new_from_existing_data(
         impure: Box<dyn Impure>,
         uid: u64,
-        pubkey: [u8; 32],
-        privkey: Vec<u8>,
+        priv_key: String,
         password: String,
-    ) -> Self {
+    ) -> Result<Self> {
         let keypair = {
             let cipher = HarmonyAes::from_pass(password.as_bytes());
-            let decrypted = cipher.decrypt(privkey);
+            let bytes = priv_key.as_bytes();
+            let decrypted = cipher.decrypt(bytes.into());
 
-            let pubkey = ed25519_dalek::PublicKey::from_bytes(&pubkey)
-                .expect("Failed to create public key from bytes");
-            let privkey = ed25519_dalek::SecretKey::from_bytes(&decrypted)
-                .expect("Failed to create private key from bytes");
-
-            Keypair {
-                public: pubkey,
-                secret: privkey,
-            }
+            RSAPrivateKey::from_pkcs8(&decrypted)?
         };
-        E2EEClient {
+        Ok(E2EEClient {
             impure,
             stream_states: HashMap::new(),
             message_stream_states: HashMap::new(),
             state_stream_states: HashMap::new(),
-            keypair,
+            key: keypair,
             uid,
-        }
+        })
     }
 
     pub fn register_channels(
@@ -154,19 +151,18 @@ impl E2EEClient {
         (messages_key, state_key)
     }
 
-    fn decrypt_using_privkey(&self, data: Vec<u8>) -> Vec<u8> {
-        let key: [u8; 32] = self.keypair.secret.to_bytes();
-        let aes = HarmonyAes::from_key(key);
-
-        aes.decrypt(data)
+    fn decrypt_using_privkey(&self, data: Vec<u8>) -> Result<Vec<u8>> {
+        Ok(self.key.decrypt(PaddingScheme::new_pkcs1v15_encrypt(), &data)?)
     }
 
     /// message should always be a Flow in serialised form
     pub fn encrypt_message(
-        &self,
+        &mut self,
         for_channel: (StreamKind, String),
         message: Vec<u8>
     ) -> Result<Vec<u8>> {
+        let mut csprng = OsRng {};
+
         use prost::Message;
 
         // let's fetch us some state keys
@@ -175,30 +171,46 @@ impl E2EEClient {
             StreamKind::Message => state = self.message_stream_states[&for_channel.1].borrow_mut(),
             StreamKind::State => state = self.state_stream_states[&for_channel.1].borrow_mut(),
         };
+        let state_users = state.known_users.clone();
         let state_key = match for_channel.0 {
             StreamKind::Message => &mut state.messages_key,
             StreamKind::State => &mut state.state_key,
         };
 
-        // generate the new key...
-        // TODO
-        // let new_key = {
-        //     use rand::RngCore;
+        // generate the new key
+        let new_key = {
+            use rand::RngCore;
 
-        //     let mut csprng = OsRng {};
-        //     let mut key = [0u8; 32];
-        //     csprng.fill_bytes(&mut key);
+            let mut csprng = OsRng {};
+            let mut key = [0u8; 32];
+            csprng.fill_bytes(&mut key);
 
-        //     key
-        // };
-        // state_key.set_key(new_key);
+            key
+        };
 
-        // create the fanout...
-        // TODO
-
+        // create the message
         let mut signed: secret::SignedMessage = Default::default();
         signed.message = message;
         signed.from_user = self.uid;
+
+        // create the fanout...
+        signed.fanout = Some(secret::Fanout {
+            keys: {
+                let mut map = HashMap::new();
+
+                for user in state_users {
+                    let pubkey = self.impure.get_public_key_for_user(user);
+                    let k = rsa::RSAPublicKey::from_pkcs8(pubkey.as_bytes())?;
+                    let keydata = k.encrypt(&mut csprng, PaddingScheme::new_pkcs1v15_encrypt(), &new_key)?;
+
+                    map.insert(user, secret::Key {
+                        key_data: keydata
+                    });
+                }
+
+                map
+            }
+        });
 
         // TODO: sign message
 
@@ -212,6 +224,7 @@ impl E2EEClient {
         let mut out = Vec::<u8>::new();
         encrypted_message.encode(&mut out)?;
 
+        state_key.set_key(new_key);
         Ok(out)
     }
 
@@ -267,7 +280,7 @@ impl E2EEClient {
                 }
                 let key = &keys[&self.uid];
                 let data: [u8; 32] = key.key_data.as_slice().try_into()?;
-                let unenc = self.decrypt_using_privkey(data.into());
+                let unenc = self.decrypt_using_privkey(data.into())?;
                 let unenc_arr: [u8; 32] = unenc.as_slice().try_into()?;
 
                 match kind {
