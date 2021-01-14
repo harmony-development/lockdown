@@ -6,7 +6,7 @@ use std::{
     convert::{TryFrom, TryInto},
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Result};
 use rand::rngs::OsRng;
 use rsa::{PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey};
 
@@ -156,9 +156,15 @@ impl E2EEClient {
             known_users: users,
         };
 
-        println!("{:?}", self.stream_states);
+        log::trace!(
+            "Registering channels: Stream states before:\n{:?}",
+            self.stream_states
+        );
         self.stream_states.insert(data);
-        println!("{:?}", self.stream_states);
+        log::trace!(
+            "Registering channels: Stream states after:\n{:?}",
+            self.stream_states
+        );
     }
 
     pub fn prepare_channel_keys(
@@ -186,17 +192,23 @@ impl E2EEClient {
             known_users: vec![self.uid],
         };
 
-        println!("{:?}", self.stream_states);
+        log::trace!(
+            "Preparing channel keys: Stream states before:\n{:?}",
+            self.stream_states
+        );
         self.stream_states.insert(data);
-        println!("{:?}", self.stream_states);
+        log::trace!(
+            "Preparing channel keys: Stream states after:\n{:?}",
+            self.stream_states
+        );
 
         (messages_key, state_key)
     }
 
     fn decrypt_using_privkey(&self, data: Vec<u8>) -> Result<Vec<u8>> {
-        Ok(self
-            .key
-            .decrypt(PaddingScheme::new_pkcs1v15_encrypt(), &data)?)
+        self.key
+            .decrypt(PaddingScheme::new_pkcs1v15_encrypt(), &data)
+            .map_err(Into::into)
     }
 
     /// message should always be a Flow in serialised form
@@ -328,9 +340,15 @@ impl E2EEClient {
             known_users,
         };
 
-        println!("{:?}", self.stream_states);
+        log::trace!(
+            "Handling invite: Stream states before:\n{:?}",
+            self.stream_states
+        );
         self.stream_states.insert(state);
-        println!("{:?}", self.stream_states);
+        log::trace!(
+            "Handling invite: Stream states after:\n{:?}",
+            self.stream_states
+        );
 
         Ok(())
     }
@@ -349,9 +367,11 @@ impl E2EEClient {
         let mut msg: secret::EncryptedMessage = Default::default();
         msg.merge(data.as_slice())?;
 
-        println!(
-            "stream_kind: {:?} stream_id: {:?}\n {:?}",
-            kind, stream_id, self.stream_states
+        log::trace!(
+            "Handling message: stream_kind: {:?} stream_id: {:?}\n {:?}",
+            kind,
+            stream_id,
+            self.stream_states
         );
         let state = self.stream_states.get(kind, &stream_id).unwrap();
         let decrypted = match kind {
@@ -370,22 +390,19 @@ impl E2EEClient {
             let keys: &HashMap<u64, secret::Key> = &fanout.keys;
 
             if keys.len() != state.known_users.len() {
-                return Err(anyhow!(
+                bail!(
                     "Bad message fanout; length of keys is not equivalent to known trusted users"
-                ));
+                );
             }
 
             for key in &state.known_users {
                 if !keys.contains_key(&key) {
-                    return Err(anyhow!(
-                        "Bad message fanout; user ID {} is missing from keys",
-                        key
-                    ));
+                    bail!("Bad message fanout; user ID {} is missing from keys", key);
                 }
             }
 
             if !keys.contains_key(&self.uid) {
-                return Err(anyhow!("Bad message fanout; no key for self"));
+                bail!("Bad message fanout; no key for self");
             }
 
             let key = &keys[&self.uid];
