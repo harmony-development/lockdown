@@ -100,18 +100,25 @@ mod tests {
         49, 117, 73, 105, 127, 191, 12, 7, 250, 67,
     ];
 
+    fn init() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
     #[test]
     fn from_key() {
+        init();
         HarmonyAes::from_key(KEY);
     }
 
     #[test]
     fn from_pass() {
+        init();
         HarmonyAes::from_pass(PASS.as_bytes());
     }
 
     #[test]
     fn encrypt() {
+        init();
         let aes = HarmonyAes::from_key(KEY);
         let encrypted = aes.encrypt(UNENCRYPTED.to_vec());
         assert_eq!(ENCRYPTED.to_vec(), encrypted)
@@ -119,6 +126,7 @@ mod tests {
 
     #[test]
     fn decrypt() {
+        init();
         let aes = HarmonyAes::from_key(KEY);
         let decrypted = aes.decrypt(ENCRYPTED.to_vec());
         assert_eq!(UNENCRYPTED.to_vec(), decrypted)
@@ -126,6 +134,7 @@ mod tests {
 
     #[test]
     fn encrypt_decrypt() {
+        init();
         let aes = HarmonyAes::from_key(KEY);
         let encrypted = aes.encrypt(UNENCRYPTED.to_vec());
         let unencrypted = aes.decrypt(encrypted);
@@ -134,6 +143,7 @@ mod tests {
 
     #[test]
     fn decrypt_encrypt() {
+        init();
         let aes = HarmonyAes::from_key(KEY);
         let unencrypted = aes.decrypt(ENCRYPTED.to_vec());
         let encrypted = aes.encrypt(unencrypted);
