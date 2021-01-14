@@ -1,17 +1,18 @@
-use anyhow::anyhow;
-use anyhow::Result;
-use rsa::{PublicKey, RSAPrivateKey, PaddingScheme, PrivateKeyPemEncoding, PublicKeyPemEncoding};
-use rand::rngs::OsRng;
-use std::{cell::RefMut, collections::HashMap, convert::TryInto};
-
-use std::cell::RefCell;
-use std::rc::Rc;
-
-type Poki<T> = Rc<RefCell<T>>;
-
+use self::aes::HarmonyAes;
 use crate::api::secret;
 
-use self::aes::HarmonyAes;
+use std::{
+    cell::{RefCell, RefMut},
+    collections::HashMap,
+    convert::TryInto,
+    rc::Rc,
+};
+
+use anyhow::{anyhow, Result};
+use rand::rngs::OsRng;
+use rsa::{PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey};
+
+type Poki<T> = Rc<RefCell<T>>;
 
 mod aes;
 
@@ -58,7 +59,12 @@ impl E2EEClient {
         let data = cipher.encrypt((data.as_bytes()).into());
 
         impure.store_private_key(data);
-        impure.publish_public_key(priv_key.to_public_key().to_pem_pkcs8().expect("failed to pem key"));
+        impure.publish_public_key(
+            priv_key
+                .to_public_key()
+                .to_pem_pkcs8()
+                .expect("failed to pem key"),
+        );
 
         E2EEClient {
             impure,
@@ -152,14 +158,16 @@ impl E2EEClient {
     }
 
     fn decrypt_using_privkey(&self, data: Vec<u8>) -> Result<Vec<u8>> {
-        Ok(self.key.decrypt(PaddingScheme::new_pkcs1v15_encrypt(), &data)?)
+        Ok(self
+            .key
+            .decrypt(PaddingScheme::new_pkcs1v15_encrypt(), &data)?)
     }
 
     /// message should always be a Flow in serialised form
     pub fn encrypt_message(
         &mut self,
         for_channel: (StreamKind, String),
-        message: Vec<u8>
+        message: Vec<u8>,
     ) -> Result<Vec<u8>> {
         let mut csprng = OsRng {};
 
@@ -189,9 +197,11 @@ impl E2EEClient {
         };
 
         // create the message
-        let mut signed: secret::SignedMessage = Default::default();
-        signed.message = message;
-        signed.from_user = self.uid;
+        let mut signed = secret::SignedMessage {
+            message,
+            from_user: self.uid,
+            ..Default::default()
+        };
 
         // create the fanout...
         signed.fanout = Some(secret::Fanout {
@@ -201,15 +211,14 @@ impl E2EEClient {
                 for user in state_users {
                     let pubkey = self.impure.get_public_key_for_user(user);
                     let k = rsa::RSAPublicKey::from_pkcs8(pubkey.as_bytes())?;
-                    let keydata = k.encrypt(&mut csprng, PaddingScheme::new_pkcs1v15_encrypt(), &new_key)?;
+                    let keydata =
+                        k.encrypt(&mut csprng, PaddingScheme::new_pkcs1v15_encrypt(), &new_key)?;
 
-                    map.insert(user, secret::Key {
-                        key_data: keydata
-                    });
+                    map.insert(user, secret::Key { key_data: keydata });
                 }
 
                 map
-            }
+            },
         });
 
         // TODO: sign message
@@ -218,8 +227,10 @@ impl E2EEClient {
         signed.encode(&mut signed_bytes)?;
         let encrypted = state_key.encrypt(signed_bytes);
 
-        let mut encrypted_message: secret::EncryptedMessage = Default::default();
-        encrypted_message.message = encrypted;
+        let encrypted_message = secret::EncryptedMessage {
+            message: encrypted,
+            ..Default::default()
+        };
 
         let mut out = Vec::<u8>::new();
         encrypted_message.encode(&mut out)?;
@@ -243,13 +254,15 @@ impl E2EEClient {
         msg.merge(data.as_slice())?;
 
         let mut state: RefMut<StreamState>;
-        match kind {
-            StreamKind::Message => state = self.message_stream_states[&stream_id].borrow_mut(),
-            StreamKind::State => state = self.state_stream_states[&stream_id].borrow_mut(),
-        };
         let state_key = match kind {
-            StreamKind::Message => &mut state.messages_key,
-            StreamKind::State => &mut state.state_key,
+            StreamKind::Message => {
+                state = self.message_stream_states[&stream_id].borrow_mut();
+                &mut state.messages_key
+            }
+            StreamKind::State => {
+                state = self.state_stream_states[&stream_id].borrow_mut();
+                &mut state.state_key
+            }
         };
 
         let decrypted = state_key.decrypt(msg.message);

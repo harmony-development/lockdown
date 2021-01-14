@@ -2,14 +2,8 @@ use std::convert::TryInto;
 
 use aes::{
     cipher::{
-        generic_array::{
-            typenum::{
-                bit::{B0, B1},
-                UInt, UTerm,
-            },
-            GenericArray,
-        },
-        BlockCipher, NewBlockCipher,
+        generic_array::{typenum::UTerm, GenericArray},
+        NewBlockCipher,
     },
     Aes256,
 };
@@ -18,7 +12,6 @@ use hmac::{Hmac, Mac, NewMac};
 use sha3::Sha3_256;
 
 type U8Array<Size> = GenericArray<u8, Size>;
-type BlockSize = UInt<UInt<UInt<UInt<UInt<UTerm, B1>, B0>, B0>, B0>, B0>;
 
 type HmacSha256 = Hmac<Sha3_256>;
 type Aes256Ecb = Ecb<Aes256, Pkcs7>;
@@ -54,7 +47,10 @@ impl HarmonyAes {
     pub fn set_key(&mut self, key: [u8; 32]) {
         let arr = GenericArray::from_slice(&key);
 
-        let blank: aes::cipher::generic_array::GenericArray::<u8, aes::cipher::generic_array::typenum::UTerm> = Default::default();
+        let blank: aes::cipher::generic_array::GenericArray<
+            u8,
+            aes::cipher::generic_array::typenum::UTerm,
+        > = Default::default();
 
         let cipher = Aes256::new(&arr);
         let varlen = Aes256Ecb::new(cipher.clone(), &blank);
