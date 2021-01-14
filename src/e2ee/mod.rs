@@ -1,24 +1,26 @@
 use self::aes::HarmonyAes;
 use crate::api::secret;
 
-use std::{
-    collections::{vec_deque, HashMap, VecDeque},
-    convert::{TryFrom, TryInto},
-};
+use std::{collections::HashMap, convert::TryInto};
 
 use anyhow::{anyhow, bail, Result};
 use rand::rngs::OsRng;
-use rsa::{PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey};
+use rsa::{
+    PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey,
+    RSAPublicKey,
+};
 
 mod aes;
 
-pub trait Impure {
-    fn store_private_key(&mut self, data: Vec<u8>);
+const ENCRYPT_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Encrypt;
 
+pub trait Impure: std::fmt::Debug {
+    fn store_private_key(&mut self, data: Vec<u8>);
     fn publish_public_key(&mut self, data: String);
     fn get_public_key_for_user(&mut self, uid: u64) -> Option<String>;
 }
 
+#[derive(Debug)]
 pub struct E2EEClient {
     impure: Box<dyn Impure>,
     stream_states: StreamStates,
@@ -207,7 +209,7 @@ impl E2EEClient {
 
     fn decrypt_using_privkey(&self, data: Vec<u8>) -> Result<Vec<u8>> {
         self.key
-            .decrypt(PaddingScheme::new_pkcs1v15_encrypt(), &data)
+            .decrypt(ENCRYPT_PADDING_SCHEME, &data)
             .map_err(Into::into)
     }
 
@@ -252,12 +254,10 @@ impl E2EEClient {
                 let mut map = HashMap::new();
 
                 for user in state_users {
-                    let pubkey_pem = rsa::pem::parse(
+                    let pubkey = pubkey_from_pem(
                         self.impure.get_public_key_for_user(user).expect("user key"),
                     )?;
-                    let k = rsa::RSAPublicKey::try_from(pubkey_pem)?;
-                    let key_data =
-                        k.encrypt(&mut csprng, PaddingScheme::new_pkcs1v15_encrypt(), &new_key)?;
+                    let key_data = pubkey.encrypt(&mut csprng, ENCRYPT_PADDING_SCHEME, &new_key)?;
 
                     map.insert(user, secret::Key { key_data });
                 }
@@ -287,16 +287,15 @@ impl E2EEClient {
             .unwrap();
         state.known_users.push(for_client);
 
-        let pubkey_pem = rsa::pem::parse(
+        let pubkey = pubkey_from_pem(
             self.impure
                 .get_public_key_for_user(for_client)
                 .expect("user key"),
         )?;
-        let k = rsa::RSAPublicKey::try_from(pubkey_pem)?;
 
         let mut rng = OsRng;
         let mut encrypt_with_pubkey =
-            |data: &[u8]| k.encrypt(&mut rng, PaddingScheme::new_pkcs1v15_encrypt(), data);
+            |data: &[u8]| pubkey.encrypt(&mut rng, ENCRYPT_PADDING_SCHEME, data);
 
         let enc_message_key = encrypt_with_pubkey(&state.messages_key.get_key())?;
         let enc_state_key = encrypt_with_pubkey(&state.state_key.get_key())?;
@@ -432,6 +431,10 @@ pub(crate) fn serialize_message(msg: impl prost::Message) -> Result<Vec<u8>> {
 
 pub(crate) fn deser_message<Msg: prost::Message + Default>(data: &[u8]) -> Result<Msg> {
     Msg::decode(data).map_err(Into::into)
+}
+
+pub(crate) fn pubkey_from_pem(pem_pcks8: String) -> Result<RSAPublicKey> {
+    rsa::pem::parse(pem_pcks8)?.try_into().map_err(Into::into)
 }
 
 #[cfg(test)]

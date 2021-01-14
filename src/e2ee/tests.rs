@@ -8,6 +8,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 type Poki<T> = Rc<RefCell<T>>;
 
+#[derive(Debug)]
 struct TestImpureServer {
     private_keys: HashMap<u64, Vec<u8>>,
     public_keys: HashMap<u64, String>,
@@ -55,6 +56,7 @@ impl TestImpureServer {
     }
 }
 
+#[derive(Debug)]
 struct TestImpure {
     server: Poki<TestImpureServer>,
     uid: u64,
