@@ -1,7 +1,10 @@
 use self::aes::HarmonyAes;
 use crate::api::secret;
 
-use std::{collections::HashMap, convert::TryInto};
+use std::{
+    collections::{vec_deque, HashMap, VecDeque},
+    convert::{TryFrom, TryInto},
+};
 
 use anyhow::{anyhow, Result};
 use rand::rngs::OsRng;
@@ -13,7 +16,7 @@ pub trait Impure {
     fn store_private_key(&mut self, data: Vec<u8>);
 
     fn publish_public_key(&mut self, data: String);
-    fn get_public_key_for_user(&mut self, uid: u64) -> String;
+    fn get_public_key_for_user(&mut self, uid: u64) -> Option<String>;
 }
 
 pub struct E2EEClient {
@@ -23,7 +26,7 @@ pub struct E2EEClient {
     uid: u64,
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct StreamStates {
     inner: Vec<StreamState>,
 }
@@ -71,6 +74,7 @@ impl StreamStates {
     }
 }
 
+#[derive(Debug)]
 struct StreamState {
     message_id: String,
     messages_key: HarmonyAes,
@@ -152,7 +156,9 @@ impl E2EEClient {
             known_users: users,
         };
 
+        println!("{:?}", self.stream_states);
         self.stream_states.insert(data);
+        println!("{:?}", self.stream_states);
     }
 
     pub fn prepare_channel_keys(
@@ -177,10 +183,12 @@ impl E2EEClient {
             state_id,
             state_key: HarmonyAes::from_key(state_key),
 
-            known_users: Vec::new(),
+            known_users: vec![self.uid],
         };
 
+        println!("{:?}", self.stream_states);
         self.stream_states.insert(data);
+        println!("{:?}", self.stream_states);
 
         (messages_key, state_key)
     }
@@ -197,9 +205,7 @@ impl E2EEClient {
         for_channel: (StreamKind, String),
         message: Vec<u8>,
     ) -> Result<Vec<u8>> {
-        let mut csprng = OsRng {};
-
-        use prost::Message;
+        let mut csprng = OsRng;
 
         let (kind, stream_id) = for_channel;
         // let's fetch us some state keys
@@ -214,7 +220,7 @@ impl E2EEClient {
         let new_key = {
             use rand::RngCore;
 
-            let mut csprng = OsRng {};
+            let mut csprng = OsRng;
             let mut key = [0u8; 32];
             csprng.fill_bytes(&mut key);
 
@@ -234,12 +240,14 @@ impl E2EEClient {
                 let mut map = HashMap::new();
 
                 for user in state_users {
-                    let pubkey = self.impure.get_public_key_for_user(user);
-                    let k = rsa::RSAPublicKey::from_pkcs8(pubkey.as_bytes())?;
-                    let keydata =
+                    let pubkey_pem = rsa::pem::parse(
+                        self.impure.get_public_key_for_user(user).expect("user key"),
+                    )?;
+                    let k = rsa::RSAPublicKey::try_from(pubkey_pem)?;
+                    let key_data =
                         k.encrypt(&mut csprng, PaddingScheme::new_pkcs1v15_encrypt(), &new_key)?;
 
-                    map.insert(user, secret::Key { key_data: keydata });
+                    map.insert(user, secret::Key { key_data });
                 }
 
                 map
@@ -248,8 +256,7 @@ impl E2EEClient {
 
         // TODO: sign message
 
-        let mut signed_bytes = Vec::<u8>::new();
-        signed.encode(&mut signed_bytes)?;
+        let signed_bytes = serialize_message(signed)?;
         let encrypted = state_key.encrypt(signed_bytes);
 
         let encrypted_message = secret::EncryptedMessage {
@@ -257,11 +264,75 @@ impl E2EEClient {
             ..Default::default()
         };
 
-        let mut out = Vec::<u8>::new();
-        encrypted_message.encode(&mut out)?;
-
         state_key.set_key(new_key);
-        Ok(out)
+        Ok(serialize_message(encrypted_message)?)
+    }
+
+    pub fn create_invite(&mut self, messages_id: String, for_client: u64) -> Result<Vec<u8>> {
+        let state = self
+            .stream_states
+            .get_mut(StreamKind::Message, &messages_id)
+            .unwrap();
+        state.known_users.push(for_client);
+
+        let pubkey_pem = rsa::pem::parse(
+            self.impure
+                .get_public_key_for_user(for_client)
+                .expect("user key"),
+        )?;
+        let k = rsa::RSAPublicKey::try_from(pubkey_pem)?;
+
+        let mut rng = OsRng;
+        let mut encrypt_with_pubkey =
+            |data: &[u8]| k.encrypt(&mut rng, PaddingScheme::new_pkcs1v15_encrypt(), data);
+
+        let enc_message_key = encrypt_with_pubkey(&state.messages_key.get_key())?;
+        let enc_state_key = encrypt_with_pubkey(&state.state_key.get_key())?;
+
+        let invite = secret::Invite {
+            message_id: state.message_id.clone(),
+            state_id: state.state_id.clone(),
+            message_key: enc_message_key,
+            state_key: enc_state_key,
+            known_users: state.known_users.clone(),
+        };
+
+        Ok(serialize_message(invite)?)
+    }
+
+    pub fn handle_invite(&mut self, invite: Vec<u8>) -> Result<()> {
+        let secret::Invite {
+            message_id,
+            state_id,
+            message_key: enc_message_key,
+            state_key: enc_state_key,
+            known_users,
+        } = deser_message(invite.as_slice())?;
+
+        let message_key = self.decrypt_using_privkey(enc_message_key)?;
+        let state_key = self.decrypt_using_privkey(enc_state_key)?;
+
+        let state = StreamState {
+            message_id,
+            state_id,
+            state_key: HarmonyAes::from_key(
+                state_key
+                    .try_into()
+                    .map_err(|_| anyhow!("State key not expected length"))?,
+            ),
+            messages_key: HarmonyAes::from_key(
+                message_key
+                    .try_into()
+                    .map_err(|_| anyhow!("Message key not expected length"))?,
+            ),
+            known_users,
+        };
+
+        println!("{:?}", self.stream_states);
+        self.stream_states.insert(state);
+        println!("{:?}", self.stream_states);
+
+        Ok(())
     }
 
     /// handle_message takes in the type of stream the message came from, the stream's ID, and
@@ -278,6 +349,10 @@ impl E2EEClient {
         let mut msg: secret::EncryptedMessage = Default::default();
         msg.merge(data.as_slice())?;
 
+        println!(
+            "stream_kind: {:?} stream_id: {:?}\n {:?}",
+            kind, stream_id, self.stream_states
+        );
         let state = self.stream_states.get(kind, &stream_id).unwrap();
         let decrypted = match kind {
             StreamKind::Message => state.messages_key.decrypt(msg.message),
@@ -291,38 +366,36 @@ impl E2EEClient {
         let mut flow: secret::Flow = Default::default();
         flow.merge(signed_msg.message.as_slice())?;
 
-        match signed_msg.fanout {
-            Some(fanout) => {
-                let keys: &HashMap<u64, secret::Key> = &fanout.keys;
-                
-                if keys.len() != (state.known_users.len() + 1) {
-                    return Err(anyhow!("Bad message fanout; length of keys is not equivalent to known trusted users"));
-                }
+        if let Some(fanout) = signed_msg.fanout {
+            let keys: &HashMap<u64, secret::Key> = &fanout.keys;
 
-                for key in &state.known_users {
-                    if !keys.contains_key(&key) {
-                        return Err(anyhow!(
-                            "Bad message fanout; user ID {} is missing from keys",
-                            key
-                        ));
-                    }
-                }
-
-                if !keys.contains_key(&self.uid) {
-                    return Err(anyhow!("Bad message fanout; no key for self"));
-                }
-
-                let key = &keys[&self.uid];
-                let data: [u8; 32] = key.key_data.as_slice().try_into()?;
-                let unenc = self.decrypt_using_privkey(data.into())?;
-                let unenc_arr: [u8; 32] = unenc.as_slice().try_into()?;
-
-                self.stream_states
-                    .get_mut_key(kind, &stream_id)
-                    .unwrap()
-                    .set_key(unenc_arr);
+            if keys.len() != state.known_users.len() {
+                return Err(anyhow!(
+                    "Bad message fanout; length of keys is not equivalent to known trusted users"
+                ));
             }
-            None => (),
+
+            for key in &state.known_users {
+                if !keys.contains_key(&key) {
+                    return Err(anyhow!(
+                        "Bad message fanout; user ID {} is missing from keys",
+                        key
+                    ));
+                }
+            }
+
+            if !keys.contains_key(&self.uid) {
+                return Err(anyhow!("Bad message fanout; no key for self"));
+            }
+
+            let key = &keys[&self.uid];
+            let unenc = self.decrypt_using_privkey(key.key_data.clone())?;
+            let unenc_arr: [u8; 32] = unenc.as_slice().try_into()?;
+
+            self.stream_states
+                .get_mut_key(kind, &stream_id)
+                .unwrap()
+                .set_key(unenc_arr);
         };
 
         // TODO:
@@ -331,6 +404,17 @@ impl E2EEClient {
 
         Ok((signed_msg.from_user, signed_msg.message))
     }
+}
+
+pub(crate) fn serialize_message(msg: impl prost::Message) -> Result<Vec<u8>> {
+    let len = msg.encoded_len();
+    let mut buf = Vec::with_capacity(len);
+    msg.encode(&mut buf)?;
+    Ok(buf)
+}
+
+pub(crate) fn deser_message<Msg: prost::Message + Default>(data: &[u8]) -> Result<Msg> {
+    Msg::decode(data).map_err(Into::into)
 }
 
 #[cfg(test)]

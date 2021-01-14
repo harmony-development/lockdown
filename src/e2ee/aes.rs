@@ -1,4 +1,5 @@
 use std::convert::TryInto;
+use std::fmt::{self, Debug, Formatter};
 
 use aes::{
     cipher::{
@@ -19,6 +20,15 @@ type Aes256Ecb = Ecb<Aes256, Pkcs7>;
 pub struct HarmonyAes {
     aes: Aes256,
     aes_varlen: Aes256Ecb,
+    key: [u8; 32],
+}
+
+impl Debug for HarmonyAes {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        f.debug_struct("HarmonyAes")
+            .field("key", &self.key)
+            .finish()
+    }
 }
 
 impl HarmonyAes {
@@ -33,6 +43,7 @@ impl HarmonyAes {
         HarmonyAes {
             aes: cipher,
             aes_varlen: varlen,
+            key,
         }
     }
 
@@ -57,6 +68,10 @@ impl HarmonyAes {
 
         self.aes = cipher;
         self.aes_varlen = varlen;
+    }
+
+    pub fn get_key(&self) -> [u8; 32] {
+        self.key
     }
 
     pub fn encrypt(&self, data: Vec<u8>) -> Vec<u8> {

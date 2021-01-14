@@ -1,4 +1,5 @@
 use rand::Rng;
+use rsa::{RSAPrivateKey, RSAPublicKey};
 
 use crate::api::secret;
 
@@ -25,8 +26,13 @@ impl TestImpureServer {
     fn store_private_key(&mut self, id: u64, key: Vec<u8>) {
         self.private_keys.insert(id, key);
     }
+
     fn publish_public_key(&mut self, id: u64, key: String) {
         self.public_keys.insert(id, key);
+    }
+
+    fn get_public_key_for_user(&self, id: &u64) -> Option<String> {
+        self.public_keys.get(id).cloned()
     }
 
     fn new_channels(&mut self) -> (String, String) {
@@ -67,12 +73,13 @@ impl Impure for TestImpure {
     fn store_private_key(&mut self, data: Vec<u8>) {
         self.server.borrow_mut().store_private_key(self.uid, data);
     }
+
     fn publish_public_key(&mut self, data: String) {
         self.server.borrow_mut().publish_public_key(self.uid, data);
     }
 
-    fn get_public_key_for_user(&mut self, uid: u64) -> String {
-        todo!()
+    fn get_public_key_for_user(&mut self, uid: u64) -> Option<String> {
+        self.server.borrow().get_public_key_for_user(&uid)
     }
 }
 
@@ -91,9 +98,9 @@ fn exchange_messages() {
     println!("server");
 
     let (impure_one, client_one_id) = TestImpure::new(server.clone());
-    println!("impure one");
+    println!("impure one: {}", client_one_id);
     let (impure_two, client_two_id) = TestImpure::new(server.clone());
-    println!("impure two");
+    println!("impure two: {}", client_two_id);
 
     let mut client_one =
         E2EEClient::new_with_new_data(Box::new(impure_one), client_one_id, "hi".into());
@@ -108,11 +115,11 @@ fn exchange_messages() {
         client_one.prepare_channel_keys(messages_chan.clone(), state_chan.clone());
     println!("keys");
 
-    client_two.register_channels(
-        (messages_chan.clone(), messages_key),
-        (state_chan, state_key),
-        vec![client_one_id],
-    );
+    let invite = client_one
+        .create_invite(messages_chan.clone(), client_two_id)
+        .unwrap();
+
+    client_two.handle_invite(invite).unwrap();
     println!("client two register channels");
 
     let test_data = {
