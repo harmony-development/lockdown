@@ -54,6 +54,21 @@ impl StreamStates {
             .iter()
             .find(|state| match stream_kind { StreamKind::Message => &state.message_id, StreamKind::State => &state.state_id, } == stream_id)
     }
+
+    fn get_mut_key(&mut self, stream_kind: StreamKind, stream_id: &str) -> Option<&mut HarmonyAes> {
+        self.get_mut(stream_kind, stream_id)
+            .map(|a| match stream_kind {
+                StreamKind::Message => &mut a.messages_key,
+                StreamKind::State => &mut a.state_key,
+            })
+    }
+
+    fn get_key(&mut self, stream_kind: StreamKind, stream_id: &str) -> Option<&HarmonyAes> {
+        self.get(stream_kind, stream_id).map(|a| match stream_kind {
+            StreamKind::Message => &a.messages_key,
+            StreamKind::State => &a.state_key,
+        })
+    }
 }
 
 struct StreamState {
@@ -279,9 +294,11 @@ impl E2EEClient {
         match signed_msg.fanout {
             Some(fanout) => {
                 let keys: &HashMap<u64, secret::Key> = &fanout.keys;
+                
                 if keys.len() != (state.known_users.len() + 1) {
                     return Err(anyhow!("Bad message fanout; length of keys is not equivalent to known trusted users"));
                 }
+
                 for key in &state.known_users {
                     if !keys.contains_key(&key) {
                         return Err(anyhow!(
@@ -290,23 +307,20 @@ impl E2EEClient {
                         ));
                     }
                 }
+
                 if !keys.contains_key(&self.uid) {
                     return Err(anyhow!("Bad message fanout; no key for self"));
                 }
+
                 let key = &keys[&self.uid];
                 let data: [u8; 32] = key.key_data.as_slice().try_into()?;
                 let unenc = self.decrypt_using_privkey(data.into())?;
                 let unenc_arr: [u8; 32] = unenc.as_slice().try_into()?;
 
-                let state = self.stream_states.get_mut(kind, &stream_id).unwrap();
-                match kind {
-                    StreamKind::Message => {
-                        state.messages_key.set_key(unenc_arr);
-                    }
-                    StreamKind::State => {
-                        state.state_key.set_key(unenc_arr);
-                    }
-                }
+                self.stream_states
+                    .get_mut_key(kind, &stream_id)
+                    .unwrap()
+                    .set_key(unenc_arr);
             }
             None => (),
         };
