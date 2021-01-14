@@ -1,12 +1,12 @@
-use std::{cell::RefMut, collections::HashMap};
+use anyhow::anyhow;
+use anyhow::Result;
+use ed25519_dalek::Keypair;
 use prost::DecodeError;
 use rand::rngs::OsRng;
-use ed25519_dalek::Keypair;
-use anyhow::Result;
-use anyhow::anyhow;
+use std::{cell::RefMut, collections::HashMap};
 
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
 
 type Poki<T> = Rc<RefCell<T>>;
 
@@ -23,9 +23,9 @@ pub trait Impure {
 
 pub struct E2EEClient {
     impure: Box<dyn Impure>,
-    stream_states: HashMap<(String,String),Poki<StreamState>>,
-    message_stream_states: HashMap<String,Poki<StreamState>>,
-    state_stream_states: HashMap<String,Poki<StreamState>>,
+    stream_states: HashMap<(String, String), Poki<StreamState>>,
+    message_stream_states: HashMap<String, Poki<StreamState>>,
+    state_stream_states: HashMap<String, Poki<StreamState>>,
     keypair: Keypair,
     uid: u64,
 }
@@ -47,7 +47,7 @@ pub enum StreamKind {
 
 impl E2EEClient {
     pub fn new_with_new_data(mut impure: Box<dyn Impure>, uid: u64, password: String) -> Self {
-        let mut csprng = OsRng{};
+        let mut csprng = OsRng {};
         let keypair = Keypair::generate(&mut csprng);
 
         let cipher = HarmonyAes::from_pass(password.as_bytes());
@@ -65,7 +65,13 @@ impl E2EEClient {
             uid,
         }
     }
-    pub fn new_from_existing_data(impure: Box<dyn Impure>, uid: u64, pubkey: [u8; 32], privkey: [u8; 32], password: String) -> Self {
+    pub fn new_from_existing_data(
+        impure: Box<dyn Impure>,
+        uid: u64,
+        pubkey: [u8; 32],
+        privkey: [u8; 32],
+        password: String,
+    ) -> Self {
         let keypair = {
             let cipher = HarmonyAes::from_pass(password.as_bytes());
             let decrypted = cipher.decrypt_fixed(privkey);
@@ -86,7 +92,7 @@ impl E2EEClient {
             message_stream_states: HashMap::new(),
             state_stream_states: HashMap::new(),
             keypair,
-            uid
+            uid,
         }
     }
 
@@ -113,7 +119,8 @@ impl E2EEClient {
             state_key: HarmonyAes::from_key(state_key),
 
             known_users: Vec::new(),
-        }.into();
+        }
+        .into();
         let data: Poki<StreamState> = inner_data.into();
 
         self.stream_states
@@ -140,7 +147,12 @@ impl E2EEClient {
     /// handle_message takes in the type of stream the message came from, the stream's ID, and
     // the raw bytedata of the EncryptedMessage, and returns a tuple containing the message's author ID
     // and its inner Flow.
-    pub fn handle_message(&mut self, kind: StreamKind, stream_id: String, data: Vec<u8>) -> Result<(u64, Vec<u8>)> {
+    pub fn handle_message(
+        &mut self,
+        kind: StreamKind,
+        stream_id: String,
+        data: Vec<u8>,
+    ) -> Result<(u64, Vec<u8>)> {
         use prost::Message;
         use std::convert::TryInto;
 
@@ -149,12 +161,8 @@ impl E2EEClient {
 
         let mut state: RefMut<StreamState>;
         match kind {
-            StreamKind::Message => {
-                state = self.message_stream_states[&stream_id].borrow_mut()
-            },
-            StreamKind::State => {
-                state = self.state_stream_states[&stream_id].borrow_mut()
-            }
+            StreamKind::Message => state = self.message_stream_states[&stream_id].borrow_mut(),
+            StreamKind::State => state = self.state_stream_states[&stream_id].borrow_mut(),
         };
         let state_key = match kind {
             StreamKind::Message => &mut state.messages_key,
@@ -171,33 +179,36 @@ impl E2EEClient {
         flow.merge(signed_msg.message.as_slice())?;
 
         match flow.fanout {
-        Some(fanout) => {
-            let keys: &HashMap<u64, secret::Key> = &fanout.keys;
-            if keys.len() != (state.known_users.len() + 1) {
-                return Err(anyhow!("Bad message fanout; length of keys is not equivalent to known trusted users"));
-            }
-            for key in &state.known_users {
-                if !keys.contains_key(&key) {
-                    return Err(anyhow!("Bad message fanout; user ID {} is missing from keys", key));
+            Some(fanout) => {
+                let keys: &HashMap<u64, secret::Key> = &fanout.keys;
+                if keys.len() != (state.known_users.len() + 1) {
+                    return Err(anyhow!("Bad message fanout; length of keys is not equivalent to known trusted users"));
                 }
-            }
-            if !keys.contains_key(&self.uid) {
-                return Err(anyhow!("Bad message fanout; no key for self"));
-            }
-            let key = &keys[&self.uid];
-            let data: [u8; 32] = key.key_data.as_slice().try_into()?;
-            let unenc = self.decrypt_using_privkey_fixed(data);
+                for key in &state.known_users {
+                    if !keys.contains_key(&key) {
+                        return Err(anyhow!(
+                            "Bad message fanout; user ID {} is missing from keys",
+                            key
+                        ));
+                    }
+                }
+                if !keys.contains_key(&self.uid) {
+                    return Err(anyhow!("Bad message fanout; no key for self"));
+                }
+                let key = &keys[&self.uid];
+                let data: [u8; 32] = key.key_data.as_slice().try_into()?;
+                let unenc = self.decrypt_using_privkey_fixed(data);
 
-            match kind {
-                StreamKind::Message => {
-                    state.messages_key.set_key(unenc);
-                },
-                StreamKind::State => {
-                    state.state_key.set_key(unenc);
+                match kind {
+                    StreamKind::Message => {
+                        state.messages_key.set_key(unenc);
+                    }
+                    StreamKind::State => {
+                        state.state_key.set_key(unenc);
+                    }
                 }
             }
-        },
-        None => (),
+            None => (),
         };
 
         // TODO:
