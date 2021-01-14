@@ -1,12 +1,14 @@
-use rand::Rng;
-use rsa::{RSAPrivateKey, RSAPublicKey};
-
+use super::{E2EEClient, Impure, StreamKind};
 use crate::api::secret;
 
-use super::{E2EEClient, Impure, StreamKind};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
-type Poki<T> = Rc<RefCell<T>>;
+use rand::Rng;
+
+type Poki<T> = Arc<Mutex<T>>;
 
 #[derive(Debug)]
 struct TestImpureServer {
@@ -71,17 +73,27 @@ impl TestImpure {
     }
 }
 
+#[async_trait::async_trait]
 impl Impure for TestImpure {
-    fn store_private_key(&mut self, data: Vec<u8>) {
-        self.server.borrow_mut().store_private_key(self.uid, data);
+    async fn store_private_key(&mut self, data: Vec<u8>) {
+        self.server
+            .lock()
+            .expect("mutex poisoned")
+            .store_private_key(self.uid, data);
     }
 
-    fn publish_public_key(&mut self, data: String) {
-        self.server.borrow_mut().publish_public_key(self.uid, data);
+    async fn publish_public_key(&mut self, data: String) {
+        self.server
+            .lock()
+            .expect("mutex poisoned")
+            .publish_public_key(self.uid, data);
     }
 
-    fn get_public_key_for_user(&mut self, uid: u64) -> Option<String> {
-        self.server.borrow().get_public_key_for_user(&uid)
+    async fn get_public_key_for_user(&mut self, uid: u64) -> Option<String> {
+        self.server
+            .lock()
+            .expect("mutex poisoned")
+            .get_public_key_for_user(&uid)
     }
 }
 
@@ -89,22 +101,22 @@ fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
-#[test]
-fn client_creation() {
+#[tokio::test]
+async fn client_creation() {
     init();
 
     const PASSWORD: &str = "very strong password";
 
-    let server = Poki::new(RefCell::new(TestImpureServer::new()));
+    let server = Poki::new(Mutex::new(TestImpureServer::new()));
     let (impure, client_id) = TestImpure::new(server);
-    E2EEClient::new_with_new_data(Box::new(impure), client_id, PASSWORD.into());
+    E2EEClient::new_with_new_data(Box::new(impure), client_id, PASSWORD.into()).await;
 }
 
-#[test]
-fn exchange_messages() {
+#[tokio::test]
+async fn exchange_messages() {
     init();
 
-    let server = Poki::new(RefCell::new(TestImpureServer::new()));
+    let server = Poki::new(Mutex::new(TestImpureServer::new()));
     log::info!("server");
 
     let (impure_one, client_one_id) = TestImpure::new(server.clone());
@@ -113,19 +125,20 @@ fn exchange_messages() {
     log::info!("impure two: {}", client_two_id);
 
     let mut client_one =
-        E2EEClient::new_with_new_data(Box::new(impure_one), client_one_id, "hi".into());
+        E2EEClient::new_with_new_data(Box::new(impure_one), client_one_id, "hi".into()).await;
     log::info!("client one");
     let mut client_two =
-        E2EEClient::new_with_new_data(Box::new(impure_two), client_two_id, "oh".into());
+        E2EEClient::new_with_new_data(Box::new(impure_two), client_two_id, "oh".into()).await;
     log::info!("client two");
 
-    let (messages_chan, state_chan) = server.borrow_mut().new_channels();
+    let (messages_chan, state_chan) = server.lock().expect("mutex poisoned").new_channels();
     log::info!("channenls");
     client_one.prepare_channel_keys(messages_chan.clone(), state_chan);
     log::info!("keys");
 
     let invite = client_one
         .create_invite(messages_chan.clone(), client_two_id)
+        .await
         .unwrap();
 
     client_two.handle_invite(invite).unwrap();
@@ -155,6 +168,7 @@ fn exchange_messages() {
             (StreamKind::Message, messages_chan.clone()),
             test_data.clone(),
         )
+        .await
         .expect("failure encrypting");
     log::info!("client one enctrpy test data");
 
@@ -190,6 +204,7 @@ fn exchange_messages() {
             (StreamKind::Message, messages_chan.clone()),
             test_data_two.clone(),
         )
+        .await
         .expect("failure encrypting");
     log::info!("client two encrypt test data two");
 
