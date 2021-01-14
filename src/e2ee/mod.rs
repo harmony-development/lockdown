@@ -1,18 +1,11 @@
 use self::aes::HarmonyAes;
 use crate::api::secret;
 
-use std::{
-    cell::{RefCell, RefMut},
-    collections::HashMap,
-    convert::TryInto,
-    rc::Rc,
-};
+use std::{collections::HashMap, convert::TryInto};
 
 use anyhow::{anyhow, Result};
 use rand::rngs::OsRng;
 use rsa::{PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey};
-
-type Poki<T> = Rc<RefCell<T>>;
 
 mod aes;
 
@@ -25,15 +18,46 @@ pub trait Impure {
 
 pub struct E2EEClient {
     impure: Box<dyn Impure>,
-    stream_states: HashMap<(String, String), Poki<StreamState>>,
-    message_stream_states: HashMap<String, Poki<StreamState>>,
-    state_stream_states: HashMap<String, Poki<StreamState>>,
+    stream_states: StreamStates,
     key: RSAPrivateKey,
     uid: u64,
 }
 
+#[derive(Default)]
+struct StreamStates {
+    inner: Vec<StreamState>,
+}
+
+impl StreamStates {
+    fn insert(&mut self, stream_state: StreamState) -> Option<StreamState> {
+        let ret;
+        // Remove if exists
+        if let Some(pos) = self.inner.iter().position(|state| {
+            state.message_id == stream_state.message_id && state.state_id == stream_state.state_id
+        }) {
+            ret = Some(self.inner.remove(pos));
+        } else {
+            ret = None;
+        }
+        self.inner.push(stream_state);
+        ret
+    }
+
+    fn get_mut(&mut self, stream_kind: StreamKind, stream_id: &str) -> Option<&mut StreamState> {
+        self.inner
+            .iter_mut()
+            .find(|state| match stream_kind { StreamKind::Message => &state.message_id, StreamKind::State => &state.state_id, } == stream_id)
+    }
+
+    fn get(&self, stream_kind: StreamKind, stream_id: &str) -> Option<&StreamState> {
+        self.inner
+            .iter()
+            .find(|state| match stream_kind { StreamKind::Message => &state.message_id, StreamKind::State => &state.state_id, } == stream_id)
+    }
+}
+
 struct StreamState {
-    messages_id: String,
+    message_id: String,
     messages_key: HarmonyAes,
 
     state_id: String,
@@ -42,6 +66,7 @@ struct StreamState {
     known_users: Vec<u64>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamKind {
     Message,
     State,
@@ -68,9 +93,7 @@ impl E2EEClient {
 
         E2EEClient {
             impure,
-            stream_states: HashMap::new(),
-            message_stream_states: HashMap::new(),
-            state_stream_states: HashMap::new(),
+            stream_states: StreamStates::default(),
             key: priv_key,
             uid,
         }
@@ -90,9 +113,7 @@ impl E2EEClient {
         };
         Ok(E2EEClient {
             impure,
-            stream_states: HashMap::new(),
-            message_stream_states: HashMap::new(),
-            state_stream_states: HashMap::new(),
+            stream_states: StreamStates::default(),
             key: keypair,
             uid,
         })
@@ -104,28 +125,26 @@ impl E2EEClient {
         state: (String, [u8; 32]),
         users: Vec<u64>,
     ) {
-        let inner_data: RefCell<StreamState> = StreamState {
-            messages_id: messages.0.clone(),
-            messages_key: HarmonyAes::from_key(messages.1),
+        let (message_id, messages_key) = messages;
+        let (state_id, state_key) = state;
 
-            state_id: state.0.clone(),
-            state_key: HarmonyAes::from_key(state.1),
+        let data = StreamState {
+            message_id,
+            messages_key: HarmonyAes::from_key(messages_key),
+
+            state_id,
+            state_key: HarmonyAes::from_key(state_key),
 
             known_users: users,
-        }
-        .into();
-        let data: Poki<StreamState> = inner_data.into();
+        };
 
-        self.stream_states
-            .insert((messages.0.clone(), state.0.clone()), data.clone());
-        self.message_stream_states.insert(messages.0, data.clone());
-        self.state_stream_states.insert(state.0, data);
+        self.stream_states.insert(data);
     }
 
     pub fn prepare_channel_keys(
         &mut self,
-        messages: String,
-        state: String,
+        message_id: String,
+        state_id: String,
     ) -> ([u8; 32], [u8; 32]) {
         use rand::RngCore;
 
@@ -137,22 +156,17 @@ impl E2EEClient {
         csprng.fill_bytes(&mut messages_key);
         csprng.fill_bytes(&mut state_key);
 
-        let inner_data: RefCell<StreamState> = StreamState {
-            messages_id: messages.clone(),
+        let data = StreamState {
+            message_id,
             messages_key: HarmonyAes::from_key(messages_key),
 
-            state_id: state.clone(),
+            state_id,
             state_key: HarmonyAes::from_key(state_key),
 
             known_users: Vec::new(),
-        }
-        .into();
-        let data: Poki<StreamState> = inner_data.into();
+        };
 
-        self.stream_states
-            .insert((messages.clone(), state.clone()), data.clone());
-        self.message_stream_states.insert(messages, data.clone());
-        self.state_stream_states.insert(state, data);
+        self.stream_states.insert(data);
 
         (messages_key, state_key)
     }
@@ -173,17 +187,14 @@ impl E2EEClient {
 
         use prost::Message;
 
+        let (kind, stream_id) = for_channel;
         // let's fetch us some state keys
-        let mut state: RefMut<StreamState>;
-        match for_channel.0 {
-            StreamKind::Message => state = self.message_stream_states[&for_channel.1].borrow_mut(),
-            StreamKind::State => state = self.state_stream_states[&for_channel.1].borrow_mut(),
-        };
-        let state_users = state.known_users.clone();
-        let state_key = match for_channel.0 {
+        let state = self.stream_states.get_mut(kind, &stream_id).unwrap();
+        let state_key = match kind {
             StreamKind::Message => &mut state.messages_key,
             StreamKind::State => &mut state.state_key,
         };
+        let state_users = state.known_users.clone();
 
         // generate the new key
         let new_key = {
@@ -253,19 +264,11 @@ impl E2EEClient {
         let mut msg: secret::EncryptedMessage = Default::default();
         msg.merge(data.as_slice())?;
 
-        let mut state: RefMut<StreamState>;
-        let state_key = match kind {
-            StreamKind::Message => {
-                state = self.message_stream_states[&stream_id].borrow_mut();
-                &mut state.messages_key
-            }
-            StreamKind::State => {
-                state = self.state_stream_states[&stream_id].borrow_mut();
-                &mut state.state_key
-            }
+        let state = self.stream_states.get(kind, &stream_id).unwrap();
+        let decrypted = match kind {
+            StreamKind::Message => state.messages_key.decrypt(msg.message),
+            StreamKind::State => state.state_key.decrypt(msg.message),
         };
-
-        let decrypted = state_key.decrypt(msg.message);
 
         let mut signed_msg: secret::SignedMessage = Default::default();
         signed_msg.merge(decrypted.as_slice())?;
@@ -296,6 +299,7 @@ impl E2EEClient {
                 let unenc = self.decrypt_using_privkey(data.into())?;
                 let unenc_arr: [u8; 32] = unenc.as_slice().try_into()?;
 
+                let state = self.stream_states.get_mut(kind, &stream_id).unwrap();
                 match kind {
                     StreamKind::Message => {
                         state.messages_key.set_key(unenc_arr);

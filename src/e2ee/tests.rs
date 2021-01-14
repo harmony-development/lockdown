@@ -2,8 +2,10 @@ use rand::Rng;
 
 use crate::api::secret;
 
-use super::{E2EEClient, Impure, Poki, StreamKind};
-use std::{cell::RefCell, collections::HashMap};
+use super::{E2EEClient, Impure, StreamKind};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+type Poki<T> = Rc<RefCell<T>>;
 
 struct TestImpureServer {
     private_keys: HashMap<u64, Vec<u8>>,
