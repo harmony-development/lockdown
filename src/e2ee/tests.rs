@@ -77,6 +77,15 @@ impl Impure for TestImpure {
 }
 
 #[test]
+fn client_creation() {
+    const PASSWORD: &str = "very strong password";
+
+    let server = Poki::new(RefCell::new(TestImpureServer::new()));
+    let (impure, client_id) = TestImpure::new(server);
+    E2EEClient::new_with_new_data(Box::new(impure), client_id, PASSWORD.into());
+}
+
+#[test]
 fn exchange_messages() {
     let server = Poki::new(RefCell::new(TestImpureServer::new()));
     println!("server");
