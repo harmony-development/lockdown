@@ -157,16 +157,78 @@
 <span id="154">154</span>
 <span id="155">155</span>
 <span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
+<span id="167">167</span>
+<span id="168">168</span>
+<span id="169">169</span>
+<span id="170">170</span>
+<span id="171">171</span>
+<span id="172">172</span>
+<span id="173">173</span>
+<span id="174">174</span>
+<span id="175">175</span>
+<span id="176">176</span>
+<span id="177">177</span>
+<span id="178">178</span>
+<span id="179">179</span>
+<span id="180">180</span>
+<span id="181">181</span>
+<span id="182">182</span>
+<span id="183">183</span>
+<span id="184">184</span>
+<span id="185">185</span>
+<span id="186">186</span>
+<span id="187">187</span>
+<span id="188">188</span>
+<span id="189">189</span>
+<span id="190">190</span>
+<span id="191">191</span>
+<span id="192">192</span>
+<span id="193">193</span>
+<span id="194">194</span>
+<span id="195">195</span>
+<span id="196">196</span>
+<span id="197">197</span>
+<span id="198">198</span>
+<span id="199">199</span>
+<span id="200">200</span>
+<span id="201">201</span>
+<span id="202">202</span>
+<span id="203">203</span>
+<span id="204">204</span>
+<span id="205">205</span>
+<span id="206">206</span>
+<span id="207">207</span>
+<span id="208">208</span>
+<span id="209">209</span>
+<span id="210">210</span>
+<span id="211">211</span>
+<span id="212">212</span>
 </pre><div class="example-wrap"><pre class="rust ">
-<span class="kw">use</span> <span class="self">self</span>::<span class="ident">aes</span>::<span class="ident">HarmonyAes</span>;
-<span class="kw">use</span> <span class="kw">crate</span>::<span class="ident">api</span>::<span class="ident">secret</span>;
-
-<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">collections</span>::<span class="ident">HashMap</span>;
-<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">rc</span>::<span class="ident">Rc</span>;
-
-<span class="kw">use</span> <span class="ident">ed25519_dalek</span>::<span class="ident">Keypair</span>;
+<span class="kw">use</span> <span class="ident">std</span>::{<span class="ident">cell</span>::<span class="ident">RefMut</span>, <span class="ident">collections</span>::<span class="ident">HashMap</span>};
 <span class="kw">use</span> <span class="ident">prost</span>::<span class="ident">DecodeError</span>;
 <span class="kw">use</span> <span class="ident">rand</span>::<span class="ident">rngs</span>::<span class="ident">OsRng</span>;
+<span class="kw">use</span> <span class="ident">ed25519_dalek</span>::<span class="ident">Keypair</span>;
+<span class="kw">use</span> <span class="ident">anyhow</span>::<span class="prelude-ty">Result</span>;
+<span class="kw">use</span> <span class="ident">anyhow</span>::<span class="ident">anyhow</span>;
+
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">rc</span>::<span class="ident">Rc</span>;
+<span class="kw">use</span> <span class="ident">std</span>::<span class="ident">cell</span>::<span class="ident">RefCell</span>;
+
+<span class="kw">type</span> <span class="ident">Poki</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">Rc</span><span class="op">&lt;</span><span class="ident">RefCell</span><span class="op">&lt;</span><span class="ident">T</span><span class="op">&gt;</span><span class="op">&gt;</span>;
+
+<span class="kw">use</span> <span class="kw">crate</span>::<span class="ident">api</span>::<span class="ident">secret</span>;
+
+<span class="kw">use</span> <span class="self">self</span>::<span class="ident">aes</span>::<span class="ident">HarmonyAes</span>;
 
 <span class="kw">mod</span> <span class="ident">aes</span>;
 
@@ -177,10 +239,11 @@
 
 <span class="kw">pub</span> <span class="kw">struct</span> <span class="ident">E2EEClient</span> {
     <span class="ident">impure</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">dyn</span> <span class="ident">Impure</span><span class="op">&gt;</span>,
-    <span class="ident">stream_states</span>: <span class="ident">HashMap</span><span class="op">&lt;</span>(<span class="ident">String</span>, <span class="ident">String</span>), <span class="ident">Rc</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">message_stream_states</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="ident">Rc</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span><span class="op">&gt;</span>,
-    <span class="ident">state_stream_states</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="ident">Rc</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">stream_states</span>: <span class="ident">HashMap</span><span class="op">&lt;</span>(<span class="ident">String</span>,<span class="ident">String</span>),<span class="ident">Poki</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">message_stream_states</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">String</span>,<span class="ident">Poki</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span><span class="op">&gt;</span>,
+    <span class="ident">state_stream_states</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">String</span>,<span class="ident">Poki</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">keypair</span>: <span class="ident">Keypair</span>,
+    <span class="ident">uid</span>: <span class="ident">u64</span>,
 }
 
 <span class="kw">struct</span> <span class="ident">StreamState</span> {
@@ -199,12 +262,11 @@
 }
 
 <span class="kw">impl</span> <span class="ident">E2EEClient</span> {
-    <span class="doccomment">/// Creates a new [`E2EEClient`].</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new</span>(<span class="kw-2">mut</span> <span class="ident">impure</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">dyn</span> <span class="ident">Impure</span><span class="op">&gt;</span>, <span class="ident">password</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">csprng</span> <span class="op">=</span> <span class="ident">OsRng</span> {};
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new_with_new_data</span>(<span class="kw-2">mut</span> <span class="ident">impure</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">dyn</span> <span class="ident">Impure</span><span class="op">&gt;</span>, <span class="ident">uid</span>: <span class="ident">u64</span>, <span class="ident">password</span>: <span class="ident">String</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">csprng</span> <span class="op">=</span> <span class="ident">OsRng</span>{};
         <span class="kw">let</span> <span class="ident">keypair</span> <span class="op">=</span> <span class="ident">Keypair</span>::<span class="ident">generate</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">csprng</span>);
 
-        <span class="kw">let</span> <span class="ident">cipher</span> <span class="op">=</span> <span class="ident">HarmonyAes</span>::<span class="ident">from_pass</span>(<span class="ident">password</span>);
+        <span class="kw">let</span> <span class="ident">cipher</span> <span class="op">=</span> <span class="ident">HarmonyAes</span>::<span class="ident">from_pass</span>(<span class="ident">password</span>.<span class="ident">as_bytes</span>());
         <span class="kw">let</span> <span class="ident">data</span> <span class="op">=</span> <span class="ident">cipher</span>.<span class="ident">encrypt_fixed</span>(<span class="kw-2">*</span><span class="ident">keypair</span>.<span class="ident">secret</span>.<span class="ident">as_bytes</span>());
 
         <span class="ident">impure</span>.<span class="ident">store_private_key</span>(<span class="kw-2">&amp;</span><span class="ident">data</span>);
@@ -216,18 +278,12 @@
             <span class="ident">message_stream_states</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">state_stream_states</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">keypair</span>,
+            <span class="ident">uid</span>,
         }
     }
-
-    <span class="doccomment">/// Creates a new [`E2EEClient`] using existing data.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">from_existing</span>(
-        <span class="ident">impure</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">dyn</span> <span class="ident">Impure</span><span class="op">&gt;</span>,
-        <span class="ident">pubkey</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
-        <span class="ident">privkey</span>: [<span class="ident">u8</span>; <span class="number">32</span>],
-        <span class="ident">password</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>],
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">new_from_existing_data</span>(<span class="ident">impure</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">dyn</span> <span class="ident">Impure</span><span class="op">&gt;</span>, <span class="ident">uid</span>: <span class="ident">u64</span>, <span class="ident">pubkey</span>: [<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">privkey</span>: [<span class="ident">u8</span>; <span class="number">32</span>], <span class="ident">password</span>: <span class="ident">String</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
         <span class="kw">let</span> <span class="ident">keypair</span> <span class="op">=</span> {
-            <span class="kw">let</span> <span class="ident">cipher</span> <span class="op">=</span> <span class="ident">HarmonyAes</span>::<span class="ident">from_pass</span>(<span class="ident">password</span>);
+            <span class="kw">let</span> <span class="ident">cipher</span> <span class="op">=</span> <span class="ident">HarmonyAes</span>::<span class="ident">from_pass</span>(<span class="ident">password</span>.<span class="ident">as_bytes</span>());
             <span class="kw">let</span> <span class="ident">decrypted</span> <span class="op">=</span> <span class="ident">cipher</span>.<span class="ident">decrypt_fixed</span>(<span class="ident">privkey</span>);
 
             <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="ident">ed25519_dalek</span>::<span class="ident">PublicKey</span>::<span class="ident">from_bytes</span>(<span class="kw-2">&amp;</span><span class="ident">pubkey</span>)
@@ -246,6 +302,7 @@
             <span class="ident">message_stream_states</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">state_stream_states</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">keypair</span>,
+            <span class="ident">uid</span>
         }
     }
 
@@ -264,7 +321,7 @@
         <span class="ident">csprng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">messages_key</span>);
         <span class="ident">csprng</span>.<span class="ident">fill_bytes</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">state_key</span>);
 
-        <span class="kw">let</span> <span class="ident">data</span>: <span class="ident">Rc</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">StreamState</span> {
+        <span class="kw">let</span> <span class="ident">inner_data</span>: <span class="ident">RefCell</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">StreamState</span> {
             <span class="ident">messages_id</span>: <span class="ident">messages</span>.<span class="ident">clone</span>(),
             <span class="ident">messages_key</span>: <span class="ident">HarmonyAes</span>::<span class="ident">from_key</span>(<span class="ident">messages_key</span>),
 
@@ -272,8 +329,8 @@
             <span class="ident">state_key</span>: <span class="ident">HarmonyAes</span>::<span class="ident">from_key</span>(<span class="ident">state_key</span>),
 
             <span class="ident">known_users</span>: <span class="ident">Vec</span>::<span class="ident">new</span>(),
-        }
-        .<span class="ident">into</span>();
+        }.<span class="ident">into</span>();
+        <span class="kw">let</span> <span class="ident">data</span>: <span class="ident">Poki</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span> <span class="op">=</span> <span class="ident">inner_data</span>.<span class="ident">into</span>();
 
         <span class="self">self</span>.<span class="ident">stream_states</span>
             .<span class="ident">insert</span>((<span class="ident">messages</span>.<span class="ident">clone</span>(), <span class="ident">state</span>.<span class="ident">clone</span>()), <span class="ident">data</span>.<span class="ident">clone</span>());
@@ -283,32 +340,87 @@
         (<span class="ident">messages_key</span>, <span class="ident">state_key</span>)
     }
 
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">handle_message</span>(
-        <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
-        <span class="ident">kind</span>: <span class="ident">StreamKind</span>,
-        <span class="ident">stream_id</span>: <span class="ident">String</span>,
-        <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
-    ) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">u64</span>, <span class="ident">u64</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>), <span class="ident">DecodeError</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">decrypt_using_privkey</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">key</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> <span class="self">self</span>.<span class="ident">keypair</span>.<span class="ident">secret</span>.<span class="ident">to_bytes</span>();
+        <span class="kw">let</span> <span class="ident">aes</span> <span class="op">=</span> <span class="ident">HarmonyAes</span>::<span class="ident">from_key</span>(<span class="ident">key</span>);
+
+        <span class="ident">aes</span>.<span class="ident">decrypt</span>(<span class="ident">data</span>)
+    }
+    <span class="kw">fn</span> <span class="ident">decrypt_using_privkey_fixed</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: [<span class="ident">u8</span>; <span class="number">32</span>]) <span class="op">-</span><span class="op">&gt;</span> [<span class="ident">u8</span>; <span class="number">32</span>] {
+        <span class="kw">let</span> <span class="ident">key</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> <span class="self">self</span>.<span class="ident">keypair</span>.<span class="ident">secret</span>.<span class="ident">to_bytes</span>();
+        <span class="kw">let</span> <span class="ident">aes</span> <span class="op">=</span> <span class="ident">HarmonyAes</span>::<span class="ident">from_key</span>(<span class="ident">key</span>);
+
+        <span class="ident">aes</span>.<span class="ident">decrypt_fixed</span>(<span class="ident">data</span>)
+    }
+
+    <span class="doccomment">/// handle_message takes in the type of stream the message came from, the stream&#39;s ID, and</span>
+    <span class="comment">// the raw bytedata of the EncryptedMessage, and returns a tuple containing the message&#39;s author ID</span>
+    <span class="comment">// and its inner Flow.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">handle_message</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">kind</span>: <span class="ident">StreamKind</span>, <span class="ident">stream_id</span>: <span class="ident">String</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(<span class="ident">u64</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>)<span class="op">&gt;</span> {
         <span class="kw">use</span> <span class="ident">prost</span>::<span class="ident">Message</span>;
+        <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">convert</span>::<span class="ident">TryInto</span>;
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">msg</span>: <span class="ident">secret</span>::<span class="ident">EncryptedMessage</span> <span class="op">=</span> <span class="ident">Default</span>::<span class="ident">default</span>();
         <span class="ident">msg</span>.<span class="ident">merge</span>(<span class="ident">data</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="ident">state</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">kind</span> {
-            <span class="ident">StreamKind</span>::<span class="ident">Message</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">message_stream_states</span>[<span class="kw-2">&amp;</span><span class="ident">stream_id</span>].<span class="ident">messages_key</span>,
-            <span class="ident">StreamKind</span>::<span class="ident">State</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">state_stream_states</span>[<span class="kw-2">&amp;</span><span class="ident">stream_id</span>].<span class="ident">state_key</span>,
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">state</span>: <span class="ident">RefMut</span><span class="op">&lt;</span><span class="ident">StreamState</span><span class="op">&gt;</span>;
+        <span class="kw">match</span> <span class="ident">kind</span> {
+            <span class="ident">StreamKind</span>::<span class="ident">Message</span> <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="ident">state</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">message_stream_states</span>[<span class="kw-2">&amp;</span><span class="ident">stream_id</span>].<span class="ident">borrow_mut</span>()
+            },
+            <span class="ident">StreamKind</span>::<span class="ident">State</span> <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="ident">state</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">state_stream_states</span>[<span class="kw-2">&amp;</span><span class="ident">stream_id</span>].<span class="ident">borrow_mut</span>()
+            }
+        };
+        <span class="kw">let</span> <span class="ident">state_key</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">kind</span> {
+            <span class="ident">StreamKind</span>::<span class="ident">Message</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">state</span>.<span class="ident">messages_key</span>,
+            <span class="ident">StreamKind</span>::<span class="ident">State</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">state</span>.<span class="ident">state_key</span>,
         };
 
-        <span class="kw">let</span> <span class="ident">decrypted</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">decrypt</span>(<span class="ident">msg</span>.<span class="ident">message</span>);
+        <span class="kw">let</span> <span class="ident">decrypted</span> <span class="op">=</span> <span class="ident">state_key</span>.<span class="ident">decrypt</span>(<span class="ident">msg</span>.<span class="ident">message</span>);
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">signed_msg</span>: <span class="ident">secret</span>::<span class="ident">SignedMessage</span> <span class="op">=</span> <span class="ident">Default</span>::<span class="ident">default</span>();
         <span class="ident">signed_msg</span>.<span class="ident">merge</span>(<span class="ident">decrypted</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>;
+
+        <span class="comment">// TODO: validate signature</span>
+        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">flow</span>: <span class="ident">secret</span>::<span class="ident">Flow</span> <span class="op">=</span> <span class="ident">Default</span>::<span class="ident">default</span>();
+        <span class="ident">flow</span>.<span class="ident">merge</span>(<span class="ident">signed_msg</span>.<span class="ident">message</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>;
+
+        <span class="kw">match</span> <span class="ident">flow</span>.<span class="ident">fanout</span> {
+        <span class="prelude-val">Some</span>(<span class="ident">fanout</span>) <span class="op">=</span><span class="op">&gt;</span> {
+            <span class="kw">let</span> <span class="ident">keys</span>: <span class="kw-2">&amp;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">u64</span>, <span class="ident">secret</span>::<span class="ident">Key</span><span class="op">&gt;</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">fanout</span>.<span class="ident">keys</span>;
+            <span class="kw">if</span> <span class="ident">keys</span>.<span class="ident">len</span>() <span class="op">!</span><span class="op">=</span> (<span class="ident">state</span>.<span class="ident">known_users</span>.<span class="ident">len</span>() <span class="op">+</span> <span class="number">1</span>) {
+                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="macro">anyhow</span><span class="macro">!</span>(<span class="string">&quot;Bad message fanout; length of keys is not equivalent to known trusted users&quot;</span>));
+            }
+            <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">state</span>.<span class="ident">known_users</span> {
+                <span class="kw">if</span> <span class="op">!</span><span class="ident">keys</span>.<span class="ident">contains_key</span>(<span class="kw-2">&amp;</span><span class="ident">key</span>) {
+                    <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="macro">anyhow</span><span class="macro">!</span>(<span class="string">&quot;Bad message fanout; user ID {} is missing from keys&quot;</span>, <span class="ident">key</span>));
+                }
+            }
+            <span class="kw">if</span> <span class="op">!</span><span class="ident">keys</span>.<span class="ident">contains_key</span>(<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">uid</span>) {
+                <span class="kw">return</span> <span class="prelude-val">Err</span>(<span class="macro">anyhow</span><span class="macro">!</span>(<span class="string">&quot;Bad message fanout; no key for self&quot;</span>));
+            }
+            <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">keys</span>[<span class="kw-2">&amp;</span><span class="self">self</span>.<span class="ident">uid</span>];
+            <span class="kw">let</span> <span class="ident">data</span>: [<span class="ident">u8</span>; <span class="number">32</span>] <span class="op">=</span> <span class="ident">key</span>.<span class="ident">key_data</span>.<span class="ident">as_slice</span>().<span class="ident">try_into</span>()<span class="question-mark">?</span>;
+            <span class="kw">let</span> <span class="ident">unenc</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">decrypt_using_privkey_fixed</span>(<span class="ident">data</span>);
+
+            <span class="kw">match</span> <span class="ident">kind</span> {
+                <span class="ident">StreamKind</span>::<span class="ident">Message</span> <span class="op">=</span><span class="op">&gt;</span> {
+                    <span class="ident">state</span>.<span class="ident">messages_key</span>.<span class="ident">set_key</span>(<span class="ident">unenc</span>);
+                },
+                <span class="ident">StreamKind</span>::<span class="ident">State</span> <span class="op">=</span><span class="op">&gt;</span> {
+                    <span class="ident">state</span>.<span class="ident">state_key</span>.<span class="ident">set_key</span>(<span class="ident">unenc</span>);
+                }
+            }
+        },
+        <span class="prelude-val">None</span> <span class="op">=</span><span class="op">&gt;</span> (),
+        };
 
         <span class="comment">// TODO:</span>
         <span class="comment">// add &quot;ensure has key&quot; method which looks up public keys in a cache, falls back to impure, and then finally errors if it can&#39;t find any</span>
         <span class="comment">// verify byte data of signed_msg.message using signed_msg.signature and signed_msg.from_user</span>
 
-        <span class="macro">unimplemented</span><span class="macro">!</span>(<span class="string">&quot;see above todo&quot;</span>);
+        <span class="prelude-val">Ok</span>((<span class="ident">signed_msg</span>.<span class="ident">from_user</span>, <span class="ident">signed_msg</span>.<span class="ident">message</span>))
     }
 }
 
