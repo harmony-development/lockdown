@@ -4,6 +4,7 @@ use crate::api::secret;
 use std::{collections::HashMap, convert::TryInto};
 
 use anyhow::{anyhow, bail, Result};
+use async_trait::async_trait;
 use rand::rngs::OsRng;
 use rsa::{
     PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey,
@@ -14,10 +15,11 @@ mod aes;
 
 const ENCRYPT_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Encrypt;
 
+#[async_trait]
 pub trait Impure: std::fmt::Debug {
-    fn store_private_key(&mut self, data: Vec<u8>);
-    fn publish_public_key(&mut self, data: String);
-    fn get_public_key_for_user(&mut self, uid: u64) -> Option<String>;
+    async fn store_private_key(&mut self, data: Vec<u8>);
+    async fn publish_public_key(&mut self, data: String);
+    async fn get_public_key_for_user(&mut self, uid: u64) -> Option<String>;
 }
 
 #[derive(Debug)]
@@ -94,7 +96,11 @@ pub enum StreamKind {
 }
 
 impl E2EEClient {
-    pub fn new_with_new_data(mut impure: Box<dyn Impure>, uid: u64, password: String) -> Self {
+    pub async fn new_with_new_data(
+        mut impure: Box<dyn Impure>,
+        uid: u64,
+        password: String,
+    ) -> Self {
         const BITS: usize = 4096;
 
         let priv_key = RSAPrivateKey::new(&mut OsRng, BITS).expect("failed to generate key");
@@ -103,13 +109,15 @@ impl E2EEClient {
         let cipher = HarmonyAes::from_pass(password.as_bytes());
         let data = cipher.encrypt((data.as_bytes()).into());
 
-        impure.store_private_key(data);
-        impure.publish_public_key(
-            priv_key
-                .to_public_key()
-                .to_pem_pkcs8()
-                .expect("failed to pem key"),
-        );
+        impure.store_private_key(data).await;
+        impure
+            .publish_public_key(
+                priv_key
+                    .to_public_key()
+                    .to_pem_pkcs8()
+                    .expect("failed to pem key"),
+            )
+            .await;
 
         E2EEClient {
             impure,
@@ -214,7 +222,7 @@ impl E2EEClient {
     }
 
     /// message should always be a Flow in serialised form
-    pub fn encrypt_message(
+    pub async fn encrypt_message(
         &mut self,
         for_channel: (StreamKind, String),
         message: Vec<u8>,
@@ -255,7 +263,10 @@ impl E2EEClient {
 
                 for user in state_users {
                     let pubkey = pubkey_from_pem(
-                        self.impure.get_public_key_for_user(user).expect("user key"),
+                        self.impure
+                            .get_public_key_for_user(user)
+                            .await
+                            .expect("user key"),
                     )?;
                     let key_data = pubkey.encrypt(&mut csprng, ENCRYPT_PADDING_SCHEME, &new_key)?;
 
@@ -280,7 +291,7 @@ impl E2EEClient {
         Ok(serialize_message(encrypted_message)?)
     }
 
-    pub fn create_invite(&mut self, messages_id: String, for_client: u64) -> Result<Vec<u8>> {
+    pub async fn create_invite(&mut self, messages_id: String, for_client: u64) -> Result<Vec<u8>> {
         let state = self
             .stream_states
             .get_mut(StreamKind::Message, &messages_id)
@@ -290,6 +301,7 @@ impl E2EEClient {
         let pubkey = pubkey_from_pem(
             self.impure
                 .get_public_key_for_user(for_client)
+                .await
                 .expect("user key"),
         )?;
 
