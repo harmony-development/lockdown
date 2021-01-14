@@ -51,7 +51,18 @@ impl HarmonyAes {
         Self::from_key(password_hash.try_into().unwrap())
     }
 
-    /// Encrypt some data.
+    pub fn set_key(&mut self, key: [u8; 32]) {
+        let arr = GenericArray::from_slice(&key);
+
+        let blank: aes::cipher::generic_array::GenericArray::<u8, aes::cipher::generic_array::typenum::UTerm> = Default::default();
+
+        let cipher = Aes256::new(&arr);
+        let varlen = Aes256Ecb::new(cipher.clone(), &blank);
+
+        self.aes = cipher;
+        self.aes_varlen = varlen;
+    }
+
     pub fn encrypt(&self, data: Vec<u8>) -> Vec<u8> {
         let cipher = self.aes_varlen.clone();
         cipher.encrypt_vec(&data)
