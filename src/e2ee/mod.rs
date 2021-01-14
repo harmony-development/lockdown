@@ -1,9 +1,8 @@
 use anyhow::anyhow;
 use anyhow::Result;
 use ed25519_dalek::Keypair;
-use prost::DecodeError;
 use rand::rngs::OsRng;
-use std::{cell::RefMut, collections::HashMap};
+use std::{cell::RefMut, collections::HashMap, convert::TryInto};
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -17,7 +16,7 @@ use self::aes::HarmonyAes;
 mod aes;
 
 pub trait Impure {
-    fn store_private_key(&mut self, data: &[u8; 32]);
+    fn store_private_key(&mut self, data: Vec<u8>);
     fn publish_public_key(&mut self, data: &[u8; 32]);
 }
 
@@ -51,9 +50,9 @@ impl E2EEClient {
         let keypair = Keypair::generate(&mut csprng);
 
         let cipher = HarmonyAes::from_pass(password.as_bytes());
-        let data = cipher.encrypt_fixed(*keypair.secret.as_bytes());
+        let data = cipher.encrypt((*keypair.secret.as_bytes()).into());
 
-        impure.store_private_key(&data);
+        impure.store_private_key(data);
         impure.publish_public_key(keypair.public.as_bytes());
 
         E2EEClient {
@@ -69,12 +68,12 @@ impl E2EEClient {
         impure: Box<dyn Impure>,
         uid: u64,
         pubkey: [u8; 32],
-        privkey: [u8; 32],
+        privkey: Vec<u8>,
         password: String,
     ) -> Self {
         let keypair = {
             let cipher = HarmonyAes::from_pass(password.as_bytes());
-            let decrypted = cipher.decrypt_fixed(privkey);
+            let decrypted = cipher.decrypt(privkey);
 
             let pubkey = ed25519_dalek::PublicKey::from_bytes(&pubkey)
                 .expect("Failed to create public key from bytes");
@@ -94,6 +93,30 @@ impl E2EEClient {
             keypair,
             uid,
         }
+    }
+
+    pub fn register_channels(
+        &mut self,
+        messages: (String, [u8; 32]),
+        state: (String, [u8; 32]),
+        users: Vec<u64>,
+    ) {
+        let inner_data: RefCell<StreamState> = StreamState {
+            messages_id: messages.0.clone(),
+            messages_key: HarmonyAes::from_key(messages.1),
+
+            state_id: state.0.clone(),
+            state_key: HarmonyAes::from_key(state.1),
+
+            known_users: users,
+        }
+        .into();
+        let data: Poki<StreamState> = inner_data.into();
+
+        self.stream_states
+            .insert((messages.0.clone(), state.0.clone()), data.clone());
+        self.message_stream_states.insert(messages.0, data.clone());
+        self.state_stream_states.insert(state.0, data);
     }
 
     pub fn prepare_channel_keys(
@@ -137,11 +160,59 @@ impl E2EEClient {
 
         aes.decrypt(data)
     }
-    fn decrypt_using_privkey_fixed(&self, data: [u8; 32]) -> [u8; 32] {
-        let key: [u8; 32] = self.keypair.secret.to_bytes();
-        let aes = HarmonyAes::from_key(key);
 
-        aes.decrypt_fixed(data)
+    /// message should always be a Flow in serialised form
+    pub fn encrypt_message(
+        &self,
+        for_channel: (StreamKind, String),
+        message: Vec<u8>
+    ) -> Result<Vec<u8>> {
+        use prost::Message;
+
+        // let's fetch us some state keys
+        let mut state: RefMut<StreamState>;
+        match for_channel.0 {
+            StreamKind::Message => state = self.message_stream_states[&for_channel.1].borrow_mut(),
+            StreamKind::State => state = self.state_stream_states[&for_channel.1].borrow_mut(),
+        };
+        let state_key = match for_channel.0 {
+            StreamKind::Message => &mut state.messages_key,
+            StreamKind::State => &mut state.state_key,
+        };
+
+        // generate the new key...
+        // TODO
+        // let new_key = {
+        //     use rand::RngCore;
+
+        //     let mut csprng = OsRng {};
+        //     let mut key = [0u8; 32];
+        //     csprng.fill_bytes(&mut key);
+
+        //     key
+        // };
+        // state_key.set_key(new_key);
+
+        // create the fanout...
+        // TODO
+
+        let mut signed: secret::SignedMessage = Default::default();
+        signed.message = message;
+        signed.from_user = self.uid;
+
+        // TODO: sign message
+
+        let mut signed_bytes = Vec::<u8>::new();
+        signed.encode(&mut signed_bytes)?;
+        let encrypted = state_key.encrypt(signed_bytes);
+
+        let mut encrypted_message: secret::EncryptedMessage = Default::default();
+        encrypted_message.message = encrypted;
+
+        let mut out = Vec::<u8>::new();
+        encrypted_message.encode(&mut out)?;
+
+        Ok(out)
     }
 
     /// handle_message takes in the type of stream the message came from, the stream's ID, and
@@ -154,7 +225,6 @@ impl E2EEClient {
         data: Vec<u8>,
     ) -> Result<(u64, Vec<u8>)> {
         use prost::Message;
-        use std::convert::TryInto;
 
         let mut msg: secret::EncryptedMessage = Default::default();
         msg.merge(data.as_slice())?;
@@ -178,7 +248,7 @@ impl E2EEClient {
         let mut flow: secret::Flow = Default::default();
         flow.merge(signed_msg.message.as_slice())?;
 
-        match flow.fanout {
+        match signed_msg.fanout {
             Some(fanout) => {
                 let keys: &HashMap<u64, secret::Key> = &fanout.keys;
                 if keys.len() != (state.known_users.len() + 1) {
@@ -197,14 +267,15 @@ impl E2EEClient {
                 }
                 let key = &keys[&self.uid];
                 let data: [u8; 32] = key.key_data.as_slice().try_into()?;
-                let unenc = self.decrypt_using_privkey_fixed(data);
+                let unenc = self.decrypt_using_privkey(data.into());
+                let unenc_arr: [u8; 32] = unenc.as_slice().try_into()?;
 
                 match kind {
                     StreamKind::Message => {
-                        state.messages_key.set_key(unenc);
+                        state.messages_key.set_key(unenc_arr);
                     }
                     StreamKind::State => {
-                        state.state_key.set_key(unenc);
+                        state.state_key.set_key(unenc_arr);
                     }
                 }
             }

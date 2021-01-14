@@ -73,26 +73,6 @@ impl HarmonyAes {
         let cipher = self.aes_varlen.clone();
         cipher.decrypt_vec(&data).expect("Block mode error?")
     }
-
-    pub fn encrypt_fixed(&self, data: [u8; 32]) -> [u8; 32] {
-        let mut block = U8Array::<BlockSize>::clone_from_slice(&data);
-        self.aes.encrypt_block(&mut block);
-
-        block
-            .as_slice()
-            .try_into()
-            .expect("Failed to convert encrypted block into [u8; 32]")
-    }
-
-    pub fn decrypt_fixed(&self, data: [u8; 32]) -> [u8; 32] {
-        let mut block = U8Array::<BlockSize>::clone_from_slice(&data);
-        self.aes.decrypt_block(&mut block);
-
-        block
-            .as_slice()
-            .try_into()
-            .expect("Failed to convert decrypted block into [u8; 32]")
-    }
 }
 
 #[cfg(test)]
