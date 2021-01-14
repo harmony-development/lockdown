@@ -74,10 +74,9 @@ pub enum StreamKind {
 
 impl E2EEClient {
     pub fn new_with_new_data(mut impure: Box<dyn Impure>, uid: u64, password: String) -> Self {
-        let mut csprng = OsRng {};
-        let bits = 4098;
+        const BITS: usize = 4096;
 
-        let priv_key = RSAPrivateKey::new(&mut csprng, bits).expect("failed to generate key");
+        let priv_key = RSAPrivateKey::new(&mut OsRng, BITS).expect("failed to generate key");
         let data: String = priv_key.to_pem_pkcs8().expect("failed to pem key");
 
         let cipher = HarmonyAes::from_pass(password.as_bytes());

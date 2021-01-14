@@ -79,24 +79,32 @@ impl Impure for TestImpure {
 #[test]
 fn exchange_messages() {
     let server = Poki::new(RefCell::new(TestImpureServer::new()));
+    println!("server");
 
     let (impure_one, client_one_id) = TestImpure::new(server.clone());
+    println!("impure one");
     let (impure_two, client_two_id) = TestImpure::new(server.clone());
+    println!("impure two");
 
     let mut client_one =
         E2EEClient::new_with_new_data(Box::new(impure_one), client_one_id, "hi".into());
+    println!("client one");
     let mut client_two =
         E2EEClient::new_with_new_data(Box::new(impure_two), client_two_id, "oh".into());
+    println!("client two");
 
     let (messages_chan, state_chan) = server.borrow_mut().new_channels();
+    println!("channenls");
     let (messages_key, state_key) =
         client_one.prepare_channel_keys(messages_chan.clone(), state_chan.clone());
+    println!("keys");
 
     client_two.register_channels(
         (messages_chan.clone(), messages_key),
         (state_chan, state_key),
         vec![client_one_id],
     );
+    println!("client two register channels");
 
     let test_data = {
         use prost::Message;
@@ -115,6 +123,7 @@ fn exchange_messages() {
 
         out
     };
+    println!("test data");
 
     let encrypted = client_one
         .encrypt_message(
@@ -122,10 +131,12 @@ fn exchange_messages() {
             test_data.clone(),
         )
         .expect("failure encrypting");
+    println!("client one enctrpy test data");
 
     let (user_id, data) = client_two
         .handle_message(StreamKind::Message, messages_chan.clone(), encrypted)
         .expect("failure decrypting");
+    println!("client two decrtpye encrypted test data");
 
     assert_eq!(user_id, client_one_id);
     assert_eq!(test_data, data);
@@ -147,15 +158,20 @@ fn exchange_messages() {
 
         out
     };
+    println!("test data two");
+
     let encrypted_two = client_two
         .encrypt_message(
             (StreamKind::Message, messages_chan.clone()),
             test_data_two.clone(),
         )
         .expect("failure encrypting");
+    println!("client two encrypt test data two");
+
     let (user_id_two, data_two) = client_one
         .handle_message(StreamKind::Message, messages_chan, encrypted_two)
         .expect("failure decrypting");
+    println!("client one decsrypt encryprted test data two");
 
     assert_eq!(user_id_two, client_two_id);
     assert_eq!(test_data_two, data_two);
