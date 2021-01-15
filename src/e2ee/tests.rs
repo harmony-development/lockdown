@@ -1,4 +1,4 @@
-use super::{E2EEClient, Impure, StreamKind};
+use super::{serialize_message, E2EEClient, Impure, StreamKind};
 use crate::api::secret;
 
 use std::{
@@ -140,27 +140,19 @@ async fn exchange_messages() {
         .create_invite(messages_chan.clone(), client_two_id)
         .await
         .unwrap();
-
+    log::info!("client one created invite");
     client_two.handle_invite(invite).unwrap();
-    log::info!("client two register channels");
+    log::info!("client two accepted invite");
 
-    let test_data = {
-        use prost::Message;
-
-        let pb = secret::Flow {
-            content: Some(secret::flow::Content::Message(secret::Message {
-                kind: Some(secret::message::Kind::Sent(secret::SentMessage {
-                    contents: "hi!".into(),
-                })),
+    let test_data = serialize_message(secret::Flow {
+        content: Some(secret::flow::Content::Message(secret::Message {
+            kind: Some(secret::message::Kind::Sent(secret::SentMessage {
+                contents: "hi!".into(),
             })),
-            ..Default::default()
-        };
-
-        let mut out = Vec::<u8>::new();
-        pb.encode(&mut out).expect("eep");
-
-        out
-    };
+        })),
+        ..Default::default()
+    })
+    .expect("failure serializing message");
     log::info!("test data");
 
     let encrypted = client_one
@@ -180,23 +172,15 @@ async fn exchange_messages() {
     assert_eq!(user_id, client_one_id);
     assert_eq!(test_data, data);
 
-    let test_data_two = {
-        use prost::Message;
-
-        let pb = secret::Flow {
-            content: Some(secret::flow::Content::Message(secret::Message {
-                kind: Some(secret::message::Kind::Sent(secret::SentMessage {
-                    contents: "hoi!".into(),
-                })),
+    let test_data_two = serialize_message(secret::Flow {
+        content: Some(secret::flow::Content::Message(secret::Message {
+            kind: Some(secret::message::Kind::Sent(secret::SentMessage {
+                contents: "hoi!".into(),
             })),
-            ..Default::default()
-        };
-
-        let mut out = Vec::<u8>::new();
-        pb.encode(&mut out).expect("eep");
-
-        out
-    };
+        })),
+        ..Default::default()
+    })
+    .expect("failure serializing message");
     log::info!("test data two");
 
     let encrypted_two = client_two
