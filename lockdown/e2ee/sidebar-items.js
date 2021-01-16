@@ -1,1 +1,1 @@
-initSidebarItems({"enum":[["StreamKind",""]],"struct":[["E2EEClient",""]],"trait":[["Impure",""]]});
+initSidebarItems({"enum":[["StreamKind",""]],"mod":[["error",""]],"struct":[["E2EEClient",""]],"trait":[["Impure",""]]});
