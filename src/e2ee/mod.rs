@@ -431,17 +431,17 @@ impl E2EEClient {
                 .expect("sender key"),
         )?;
 
+        // Verify signature
         let hasher =
             HmacSha512::new_varkey(signed_msg.message.as_slice()).expect("invalid key size");
         let hashed_message = hasher.finalize().into_bytes();
-        let flow: secret::Flow = match sender_pubkey.verify(
+        if let Err(err) = sender_pubkey.verify(
             SIGN_PADDING_SCHEME,
             hashed_message.as_slice(),
             signed_msg.signature.as_slice(),
         ) {
-            Ok(_) => deser_message(signed_msg.message.as_slice())?,
-            Err(err) => bail!(E2EEError::InvalidSignature(err)),
-        };
+            bail!(E2EEError::InvalidSignature(err));
+        }
 
         if let Some(fanout) = signed_msg.fanout {
             let keys: &HashMap<u64, secret::Key> = &fanout.keys;
