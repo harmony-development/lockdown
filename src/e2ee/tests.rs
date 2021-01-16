@@ -166,6 +166,7 @@ async fn exchange_messages() {
 
     let (user_id, data) = client_two
         .handle_message(StreamKind::Message, messages_chan.clone(), encrypted)
+        .await
         .expect("failure decrypting");
     log::info!("client two decrtpye encrypted test data");
 
@@ -194,6 +195,7 @@ async fn exchange_messages() {
 
     let (user_id_two, data_two) = client_one
         .handle_message(StreamKind::Message, messages_chan, encrypted_two)
+        .await
         .expect("failure decrypting");
     log::info!("client one decsrypt encryprted test data two");
 

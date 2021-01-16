@@ -5,15 +5,22 @@ use std::{collections::HashMap, convert::TryInto};
 
 use anyhow::{anyhow, bail, Result};
 use async_trait::async_trait;
+use hmac::{Hmac, Mac, NewMac};
 use rand::rngs::OsRng;
 use rsa::{
-    PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey,
+    Hash, PaddingScheme, PrivateKeyPemEncoding, PublicKey, PublicKeyPemEncoding, RSAPrivateKey,
     RSAPublicKey,
 };
+use sha3::Sha3_512;
 
 mod aes;
 
+type HmacSha512 = Hmac<Sha3_512>;
+
 const ENCRYPT_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Encrypt;
+const SIGN_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Sign {
+    hash: Some(Hash::SHA3_512),
+};
 
 #[async_trait]
 pub trait Impure: std::fmt::Debug {
@@ -221,75 +228,6 @@ impl E2EEClient {
             .map_err(Into::into)
     }
 
-    /// message should always be a Flow in serialised form
-    pub async fn encrypt_message(
-        &mut self,
-        for_channel: (StreamKind, String),
-        message: Vec<u8>,
-    ) -> Result<Vec<u8>> {
-        let mut csprng = OsRng;
-
-        let (kind, stream_id) = for_channel;
-        // let's fetch us some state keys
-        let (_, state) = self.stream_states.get_mut(kind, &stream_id).unwrap();
-        let state_key = match kind {
-            StreamKind::Message => &mut state.messages_key,
-            StreamKind::State => &mut state.state_key,
-        };
-
-        // generate the new key
-        let new_key = {
-            use rand::RngCore;
-
-            let mut csprng = OsRng;
-            let mut key = [0u8; 32];
-            csprng.fill_bytes(&mut key);
-
-            key
-        };
-
-        // create the message
-        let mut signed = secret::SignedMessage {
-            message,
-            from_user: self.uid,
-            ..Default::default()
-        };
-
-        // create the fanout...
-        signed.fanout = Some(secret::Fanout {
-            keys: {
-                let mut map = HashMap::new();
-
-                for user in &state.known_users {
-                    let pubkey = pubkey_from_pem(
-                        self.impure
-                            .get_public_key_for_user(*user)
-                            .await
-                            .expect("user key"),
-                    )?;
-                    let key_data = pubkey.encrypt(&mut csprng, ENCRYPT_PADDING_SCHEME, &new_key)?;
-
-                    map.insert(*user, secret::Key { key_data });
-                }
-
-                map
-            },
-        });
-
-        // TODO: sign message
-
-        let signed_bytes = serialize_message(signed)?;
-        let encrypted = state_key.encrypt(signed_bytes);
-
-        let encrypted_message = secret::EncryptedMessage {
-            message: encrypted,
-            ..Default::default()
-        };
-
-        state_key.set_key(new_key);
-        Ok(serialize_message(encrypted_message)?)
-    }
-
     pub async fn create_invite(&mut self, messages_id: String, for_client: u64) -> Result<Vec<u8>> {
         log::trace!(
             "Creating invite: Stream states before:\n{:?}",
@@ -374,10 +312,84 @@ impl E2EEClient {
         Ok(())
     }
 
+    /// message should always be a Flow in serialised form
+    pub async fn encrypt_message(
+        &mut self,
+        for_channel: (StreamKind, String),
+        message: Vec<u8>,
+    ) -> Result<Vec<u8>> {
+        let mut csprng = OsRng;
+
+        let (kind, stream_id) = for_channel;
+        // let's fetch us some state keys
+        let (_, state) = self.stream_states.get_mut(kind, &stream_id).unwrap();
+        let state_key = match kind {
+            StreamKind::Message => &mut state.messages_key,
+            StreamKind::State => &mut state.state_key,
+        };
+
+        // generate the new key
+        let new_key = {
+            use rand::RngCore;
+
+            let mut csprng = OsRng;
+            let mut key = [0u8; 32];
+            csprng.fill_bytes(&mut key);
+
+            key
+        };
+
+        let hasher = HmacSha512::new_varkey(message.as_slice()).expect("key was invalid size");
+        let hashed_message = hasher.finalize().into_bytes();
+        // sign the message data
+        let signature = self
+            .key
+            .sign(SIGN_PADDING_SCHEME, hashed_message.as_slice())?;
+
+        // create the message
+        let signed = secret::SignedMessage {
+            message,
+            signature,
+            // create the fanout...
+            fanout: Some(secret::Fanout {
+                keys: {
+                    let mut map = HashMap::new();
+
+                    for user in &state.known_users {
+                        let pubkey = pubkey_from_pem(
+                            self.impure
+                                .get_public_key_for_user(*user)
+                                .await
+                                .expect("user key"),
+                        )?;
+                        let key_data =
+                            pubkey.encrypt(&mut csprng, ENCRYPT_PADDING_SCHEME, &new_key)?;
+
+                        map.insert(*user, secret::Key { key_data });
+                    }
+
+                    map
+                },
+            }),
+            from_user: self.uid,
+        };
+
+        let signed_bytes = serialize_message(signed)?;
+        let encrypted = state_key.encrypt(signed_bytes);
+
+        let encrypted_message = secret::EncryptedMessage {
+            message: encrypted,
+            ..Default::default()
+        };
+
+        state_key.set_key(new_key);
+        Ok(serialize_message(encrypted_message)?)
+    }
+
     /// handle_message takes in the type of stream the message came from, the stream's ID, and
     // the raw bytedata of the EncryptedMessage, and returns a tuple containing the message's author ID
     // and its inner Flow.
-    pub fn handle_message(
+    pub async fn handle_message(
         &mut self,
         kind: StreamKind,
         stream_id: String,
@@ -402,8 +414,24 @@ impl E2EEClient {
 
         let signed_msg: secret::SignedMessage = deser_message(decrypted.as_slice())?;
 
-        // TODO: validate signature
-        let flow: secret::Flow = deser_message(signed_msg.message.as_slice())?;
+        let sender_pubkey = pubkey_from_pem(
+            self.impure
+                .get_public_key_for_user(signed_msg.from_user)
+                .await
+                .expect("sender key"),
+        )?;
+
+        let hasher =
+            HmacSha512::new_varkey(signed_msg.message.as_slice()).expect("invalid key size");
+        let hashed_message = hasher.finalize().into_bytes();
+        let flow: secret::Flow = match sender_pubkey.verify(
+            SIGN_PADDING_SCHEME,
+            hashed_message.as_slice(),
+            signed_msg.signature.as_slice(),
+        ) {
+            Ok(_) => deser_message(signed_msg.message.as_slice())?,
+            Err(err) => bail!("failed to verify signature: {}", err),
+        };
 
         if let Some(fanout) = signed_msg.fanout {
             let keys: &HashMap<u64, secret::Key> = &fanout.keys;
