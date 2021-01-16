@@ -1,3 +1,3 @@
 (function() {var implementors = {};
-implementors["lockdown"] = [{"text":"impl Eq for UserStatus","synthetic":false,"types":[]},{"text":"impl Eq for ActionType","synthetic":false,"types":[]},{"text":"impl Eq for ActionPresentation","synthetic":false,"types":[]},{"text":"impl Eq for FieldPresentation","synthetic":false,"types":[]}];
+implementors["lockdown"] = [{"text":"impl Eq for UserStatus","synthetic":false,"types":[]},{"text":"impl Eq for ActionType","synthetic":false,"types":[]},{"text":"impl Eq for ActionPresentation","synthetic":false,"types":[]},{"text":"impl Eq for FieldPresentation","synthetic":false,"types":[]},{"text":"impl Eq for StreamKind","synthetic":false,"types":[]}];
 if (window.register_implementors) {window.register_implementors(implementors);} else {window.pending_implementors = implementors;}})()
