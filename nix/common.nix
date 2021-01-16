@@ -18,6 +18,7 @@ let
   pkgs = import sources.nixpkgs {
     inherit system;
     overlays = [
+      sources.devshell.overlay
       (final: prev: {
         rustc = rustChannel.rust;
       })
