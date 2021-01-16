@@ -199,7 +199,7 @@ impl E2EEClient {
             messages_key: HarmonyAes::from_key(messages_key),
             state_key: HarmonyAes::from_key(state_key),
 
-            known_users: vec![self.uid],
+            known_users: Vec::new(),
         };
 
         log::trace!(
@@ -236,7 +236,6 @@ impl E2EEClient {
             StreamKind::Message => &mut state.messages_key,
             StreamKind::State => &mut state.state_key,
         };
-        let state_users = state.known_users.clone();
 
         // generate the new key
         let new_key = {
@@ -261,16 +260,16 @@ impl E2EEClient {
             keys: {
                 let mut map = HashMap::new();
 
-                for user in state_users {
+                for user in &state.known_users {
                     let pubkey = pubkey_from_pem(
                         self.impure
-                            .get_public_key_for_user(user)
+                            .get_public_key_for_user(*user)
                             .await
                             .expect("user key"),
                     )?;
                     let key_data = pubkey.encrypt(&mut csprng, ENCRYPT_PADDING_SCHEME, &new_key)?;
 
-                    map.insert(user, secret::Key { key_data });
+                    map.insert(*user, secret::Key { key_data });
                 }
 
                 map
@@ -292,11 +291,14 @@ impl E2EEClient {
     }
 
     pub async fn create_invite(&mut self, messages_id: String, for_client: u64) -> Result<Vec<u8>> {
+        log::trace!(
+            "Creating invite: Stream states before:\n{:?}",
+            self.stream_states
+        );
         let (id, state) = self
             .stream_states
             .get_mut(StreamKind::Message, &messages_id)
             .unwrap();
-        state.known_users.push(for_client);
 
         let pubkey = pubkey_from_pem(
             self.impure
@@ -317,9 +319,15 @@ impl E2EEClient {
             state_id: id.state_id.clone(),
             message_key: enc_message_key,
             state_key: enc_state_key,
-            known_users: state.known_users.clone(),
+            known_users: {
+                let mut users = state.known_users.clone();
+                // Invite receiver will need to know sender's known users + sender
+                users.push(self.uid);
+                users
+            },
         };
 
+        state.known_users.push(for_client);
         Ok(serialize_message(invite)?)
     }
 
@@ -392,12 +400,10 @@ impl E2EEClient {
             StreamKind::State => state.state_key.decrypt(msg.message),
         };
 
-        let mut signed_msg: secret::SignedMessage = Default::default();
-        signed_msg.merge(decrypted.as_slice())?;
+        let signed_msg: secret::SignedMessage = deser_message(decrypted.as_slice())?;
 
         // TODO: validate signature
-        let mut flow: secret::Flow = Default::default();
-        flow.merge(signed_msg.message.as_slice())?;
+        let flow: secret::Flow = deser_message(signed_msg.message.as_slice())?;
 
         if let Some(fanout) = signed_msg.fanout {
             let keys: &HashMap<u64, secret::Key> = &fanout.keys;
@@ -409,7 +415,8 @@ impl E2EEClient {
             }
 
             for key in &state.known_users {
-                if !keys.contains_key(&key) {
+                // Don't check for senders key, since we trust them already
+                if key != &signed_msg.from_user && !keys.contains_key(key) {
                     bail!("Bad message fanout; user ID {} is missing from keys", key);
                 }
             }
