@@ -1,1 +1,1 @@
-initSidebarItems({"struct":[["HarmonyAes",""]]});
+initSidebarItems({"struct":[["HarmonyAes",""]],"type":[["KeySize",""]]});
