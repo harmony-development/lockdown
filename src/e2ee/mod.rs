@@ -1,6 +1,6 @@
 use self::aes::HarmonyAes;
 use crate::{api::secret, bail};
-use error::{E2EEError, E2EEResult, FanoutError};
+use error::{E2EEError, E2EEResult, FanoutError, ImpureError};
 
 use std::{collections::HashMap, convert::TryInto};
 
@@ -26,16 +26,16 @@ const SIGN_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Sign {
 
 /// Trait used for operations that need networking, which is not handled by this library.
 #[async_trait]
-pub trait Impure: std::fmt::Debug {
-    async fn store_private_key(&mut self, data: Vec<u8>);
-    async fn publish_public_key(&mut self, data: String);
-    async fn get_public_key_for_user(&mut self, uid: u64) -> Option<String>;
+pub trait Impure<Error: ImpureError>: std::fmt::Debug {
+    async fn store_private_key(&mut self, data: Vec<u8>) -> Result<(), Error>;
+    async fn publish_public_key(&mut self, data: String) -> Result<(), Error>;
+    async fn get_public_key_for_user(&mut self, uid: u64) -> Result<Option<String>, Error>;
 }
 
 /// E2EE client implementation.
 #[derive(Debug)]
-pub struct E2EEClient {
-    impure: Box<dyn Impure>,
+pub struct E2EEClient<ImpErr: ImpureError> {
+    impure: Box<dyn Impure<ImpErr>>,
     stream_states: StreamStates,
     key: RSAPrivateKey,
     cached_keys: HashMap<u64, RSAPublicKey>,
@@ -107,12 +107,12 @@ pub enum StreamKind {
     State,
 }
 
-impl E2EEClient {
+impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
     pub async fn new_with_new_data(
-        mut impure: Box<dyn Impure>,
+        mut impure: Box<dyn Impure<ImpErr>>,
         uid: u64,
         password: String,
-    ) -> Self {
+    ) -> E2EEResult<Self, ImpErr> {
         const BITS: usize = 4096;
 
         let priv_key = RSAPrivateKey::new(&mut OsRng, BITS).expect("failed to generate key");
@@ -121,7 +121,7 @@ impl E2EEClient {
         let cipher = HarmonyAes::from_pass(password.as_bytes());
         let data = cipher.encrypt((data.as_bytes()).into());
 
-        impure.store_private_key(data).await;
+        impure.store_private_key(data).await?;
         impure
             .publish_public_key(
                 priv_key
@@ -129,23 +129,23 @@ impl E2EEClient {
                     .to_pem_pkcs8()
                     .expect("failed to pem key"),
             )
-            .await;
+            .await?;
 
-        E2EEClient {
+        Ok(E2EEClient {
             impure,
             stream_states: StreamStates::default(),
             key: priv_key,
             cached_keys: HashMap::new(),
             uid,
-        }
+        })
     }
 
     pub fn new_from_existing_data(
-        impure: Box<dyn Impure>,
+        impure: Box<dyn Impure<ImpErr>>,
         uid: u64,
         priv_key: String,
         password: String,
-    ) -> E2EEResult<Self> {
+    ) -> E2EEResult<Self, ImpErr> {
         let keypair = {
             let cipher = HarmonyAes::from_pass(password.as_bytes());
             let bytes = priv_key.as_bytes();
@@ -237,7 +237,7 @@ impl E2EEClient {
         &mut self,
         messages_id: String,
         for_client: u64,
-    ) -> E2EEResult<Vec<u8>> {
+    ) -> E2EEResult<Vec<u8>, ImpErr> {
         log::trace!(
             "Creating invite: Stream states before:\n{:?}",
             self.stream_states
@@ -250,8 +250,8 @@ impl E2EEClient {
         let pubkey = pubkey_from_pem(
             self.impure
                 .get_public_key_for_user(for_client)
-                .await
-                .expect("user key"),
+                .await?
+                .expect("expected user key"),
         )?;
 
         let mut rng = OsRng;
@@ -282,7 +282,7 @@ impl E2EEClient {
     }
 
     /// Consumes a serialized invite.
-    pub fn handle_invite(&mut self, invite: Vec<u8>) -> E2EEResult<()> {
+    pub fn handle_invite(&mut self, invite: Vec<u8>) -> E2EEResult<(), ImpErr> {
         let secret::Invite {
             message_id,
             state_id,
@@ -330,7 +330,7 @@ impl E2EEClient {
         &mut self,
         for_channel: (StreamKind, String),
         message: Vec<u8>,
-    ) -> E2EEResult<Vec<u8>> {
+    ) -> E2EEResult<Vec<u8>, ImpErr> {
         let mut csprng = OsRng;
 
         let (kind, stream_id) = for_channel;
@@ -413,7 +413,7 @@ impl E2EEClient {
         kind: StreamKind,
         stream_id: String,
         data: Vec<u8>,
-    ) -> E2EEResult<(u64, Vec<u8>)> {
+    ) -> E2EEResult<(u64, Vec<u8>), ImpErr> {
         use prost::Message;
 
         let mut msg: secret::EncryptedMessage = Default::default();
@@ -437,7 +437,7 @@ impl E2EEClient {
         let sender_pubkey = pubkey_from_pem(
             self.impure
                 .get_public_key_for_user(signed_msg.from_user)
-                .await
+                .await?
                 .expect("sender key"),
         )?;
 
@@ -490,14 +490,14 @@ impl E2EEClient {
     }
 
     #[allow(clippy::map_entry)]
-    async fn ensure_has_key(&mut self, for_uid: &u64) -> E2EEResult<&RSAPublicKey> {
+    async fn ensure_has_key(&mut self, for_uid: &u64) -> E2EEResult<&RSAPublicKey, ImpErr> {
         if self.cached_keys.contains_key(for_uid) {
             Ok(self.cached_keys.get(for_uid).unwrap())
         } else {
             let pem = self
                 .impure
                 .get_public_key_for_user(*for_uid)
-                .await
+                .await?
                 .ok_or(E2EEError::Fanout(FanoutError::UserIdMissing(*for_uid)))?;
             let key = pubkey_from_pem(pem)?;
             self.cached_keys.insert(*for_uid, key);
@@ -505,25 +505,31 @@ impl E2EEClient {
         }
     }
 
-    fn decrypt_using_privkey(&self, data: Vec<u8>) -> E2EEResult<Vec<u8>> {
+    fn decrypt_using_privkey(&self, data: Vec<u8>) -> E2EEResult<Vec<u8>, ImpErr> {
         self.key
             .decrypt(ENCRYPT_PADDING_SCHEME, &data)
             .map_err(E2EEError::Decrypt)
     }
 }
 
-pub(crate) fn serialize_message(msg: impl prost::Message) -> E2EEResult<Vec<u8>> {
+pub(crate) fn serialize_message<Msg: prost::Message, ImpErr: ImpureError>(
+    msg: Msg,
+) -> E2EEResult<Vec<u8>, ImpErr> {
     let len = msg.encoded_len();
     let mut buf = Vec::with_capacity(len);
     msg.encode(&mut buf)?;
     Ok(buf)
 }
 
-pub(crate) fn deser_message<Msg: prost::Message + Default>(data: &[u8]) -> E2EEResult<Msg> {
+pub(crate) fn deser_message<Msg: prost::Message + Default, ImpErr: ImpureError>(
+    data: &[u8],
+) -> E2EEResult<Msg, ImpErr> {
     Msg::decode(data).map_err(Into::into)
 }
 
-pub(crate) fn pubkey_from_pem(pem_pcks8: String) -> E2EEResult<RSAPublicKey> {
+pub(crate) fn pubkey_from_pem<ImpErr: ImpureError>(
+    pem_pcks8: String,
+) -> E2EEResult<RSAPublicKey, ImpErr> {
     rsa::pem::parse(pem_pcks8)?
         .try_into()
         .map_err(E2EEError::ConvertToKey)

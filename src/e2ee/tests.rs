@@ -1,11 +1,13 @@
-use super::{serialize_message, E2EEClient, Impure, StreamKind};
+use super::{error::ImpureError, E2EEClient, Impure, StreamKind};
 use crate::api::secret;
 
 use std::{
     collections::HashMap,
+    convert::Infallible,
     sync::{Arc, Mutex},
 };
 
+use prost::EncodeError;
 use rand::Rng;
 
 type Poki<T> = Arc<Mutex<T>>;
@@ -74,31 +76,43 @@ impl TestImpure {
 }
 
 #[async_trait::async_trait]
-impl Impure for TestImpure {
-    async fn store_private_key(&mut self, data: Vec<u8>) {
+impl Impure<Infallible> for TestImpure {
+    async fn store_private_key(&mut self, data: Vec<u8>) -> Result<(), Infallible> {
         self.server
             .lock()
             .expect("mutex poisoned")
             .store_private_key(self.uid, data);
+        Ok(())
     }
 
-    async fn publish_public_key(&mut self, data: String) {
+    async fn publish_public_key(&mut self, data: String) -> Result<(), Infallible> {
         self.server
             .lock()
             .expect("mutex poisoned")
             .publish_public_key(self.uid, data);
+        Ok(())
     }
 
-    async fn get_public_key_for_user(&mut self, uid: u64) -> Option<String> {
-        self.server
+    async fn get_public_key_for_user(&mut self, uid: u64) -> Result<Option<String>, Infallible> {
+        Ok(self
+            .server
             .lock()
             .expect("mutex poisoned")
-            .get_public_key_for_user(&uid)
+            .get_public_key_for_user(&uid))
     }
 }
 
+impl ImpureError for Infallible {}
+
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
+}
+
+fn serialize_message<Msg: prost::Message>(msg: Msg) -> Result<Vec<u8>, EncodeError> {
+    let len = msg.encoded_len();
+    let mut buf = Vec::with_capacity(len);
+    msg.encode(&mut buf)?;
+    Ok(buf)
 }
 
 #[tokio::test]
@@ -109,7 +123,9 @@ async fn client_creation() {
 
     let server = Poki::new(Mutex::new(TestImpureServer::new()));
     let (impure, client_id) = TestImpure::new(server);
-    E2EEClient::new_with_new_data(Box::new(impure), client_id, PASSWORD.into()).await;
+    E2EEClient::new_with_new_data(Box::new(impure), client_id, PASSWORD.into())
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -125,10 +141,14 @@ async fn exchange_messages() {
     log::info!("impure two: {}", client_two_id);
 
     let mut client_one =
-        E2EEClient::new_with_new_data(Box::new(impure_one), client_one_id, "hi".into()).await;
+        E2EEClient::new_with_new_data(Box::new(impure_one), client_one_id, "hi".into())
+            .await
+            .unwrap();
     log::info!("client one");
     let mut client_two =
-        E2EEClient::new_with_new_data(Box::new(impure_two), client_two_id, "oh".into()).await;
+        E2EEClient::new_with_new_data(Box::new(impure_two), client_two_id, "oh".into())
+            .await
+            .unwrap();
     log::info!("client two");
 
     let (messages_chan, state_chan) = server.lock().expect("mutex poisoned").new_channels();

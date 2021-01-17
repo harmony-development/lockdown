@@ -5,11 +5,14 @@ pub use rsa::errors::Error as RsaError;
 pub use rsa::pem::PemError;
 
 /// Shorthand for `Result<R, E2EEError>`.
-pub type E2EEResult<R> = Result<R, E2EEError>;
+pub type E2EEResult<R, ImpureError> = Result<R, E2EEError<ImpureError>>;
+
+/// Superset trait that `Impure` trait error needs to implement.
+pub trait ImpureError: std::fmt::Debug + std::fmt::Display {}
 
 /// Errors that this library can produce.
 #[derive(Debug)]
-pub enum E2EEError {
+pub enum E2EEError<Error: ImpureError> {
     /// Occurs if there was an error while processing the message fanout.
     Fanout(FanoutError),
     /// Occurs if a message has invalid signature.
@@ -30,11 +33,13 @@ pub enum E2EEError {
     Sign(RsaError),
     /// May (but should not) occur when converting a variable-length list to a fixed-size array.
     UnexpectedArraySize,
+    /// Error produced by an [`Impure`].
+    Impure(Error),
     /// A custom error.
     Custom(String),
 }
 
-impl Display for E2EEError {
+impl<Error: ImpureError> Display for E2EEError<Error> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
             E2EEError::Fanout(err) => write!(f, "Bad message fanout: {}", err),
@@ -63,30 +68,39 @@ impl Display for E2EEError {
             E2EEError::UnexpectedArraySize => {
                 write!(f, "Variable-length list does not have expected length")
             }
+            E2EEError::Impure(err) => {
+                write!(f, "An error occured in the impure: {}", err)
+            }
             E2EEError::Custom(msg) => write!(f, "{}", msg),
         }
     }
 }
 
-impl From<FanoutError> for E2EEError {
+impl<Error: ImpureError> From<Error> for E2EEError<Error> {
+    fn from(err: Error) -> Self {
+        E2EEError::Impure(err)
+    }
+}
+
+impl<Error: ImpureError> From<FanoutError> for E2EEError<Error> {
     fn from(err: FanoutError) -> Self {
         E2EEError::Fanout(err)
     }
 }
 
-impl From<DecodeError> for E2EEError {
+impl<Error: ImpureError> From<DecodeError> for E2EEError<Error> {
     fn from(err: DecodeError) -> Self {
         E2EEError::ProtobufDecode(err)
     }
 }
 
-impl From<EncodeError> for E2EEError {
+impl<Error: ImpureError> From<EncodeError> for E2EEError<Error> {
     fn from(err: EncodeError) -> Self {
         E2EEError::ProtobufEncode(err)
     }
 }
 
-impl From<PemError> for E2EEError {
+impl<Error: ImpureError> From<PemError> for E2EEError<Error> {
     fn from(err: PemError) -> Self {
         E2EEError::PemParse(err)
     }
