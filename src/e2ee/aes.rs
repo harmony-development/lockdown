@@ -17,10 +17,12 @@ type U8Array<Size> = GenericArray<u8, Size>;
 type HmacSha256 = Hmac<Sha3_256>;
 type Aes256Ecb = Ecb<Aes256, Pkcs7>;
 
+pub type KeySize = [u8; 32];
+
 pub struct HarmonyAes {
     aes: Aes256,
     aes_varlen: Aes256Ecb,
-    key: [u8; 32],
+    key: KeySize,
 }
 
 impl Debug for HarmonyAes {
@@ -33,7 +35,7 @@ impl Debug for HarmonyAes {
 
 impl HarmonyAes {
     /// Creates a new [`HarmonyAes`] from a key.
-    pub fn from_key(key: [u8; 32]) -> Self {
+    pub fn from_key(key: KeySize) -> Self {
         let arr = GenericArray::from_slice(&key);
         let blank = U8Array::<UTerm>::default();
 
@@ -55,7 +57,7 @@ impl HarmonyAes {
         Self::from_key(password_hash.try_into().unwrap())
     }
 
-    pub fn set_key(&mut self, key: [u8; 32]) {
+    pub fn set_key(&mut self, key: KeySize) {
         let arr = GenericArray::from_slice(&key);
 
         let blank: aes::cipher::generic_array::GenericArray<
@@ -70,7 +72,7 @@ impl HarmonyAes {
         self.aes_varlen = varlen;
     }
 
-    pub fn get_key(&self) -> [u8; 32] {
+    pub fn get_key(&self) -> KeySize {
         self.key
     }
 
@@ -90,10 +92,10 @@ impl HarmonyAes {
 mod tests {
     use super::*;
 
-    const KEY: [u8; 32] = [0; 32];
+    const KEY: KeySize = [0; 32];
     const PASS: &str = "strong password";
 
-    const UNENCRYPTED: [u8; 32] = [0; 32];
+    const UNENCRYPTED: KeySize = [0; 32];
     const ENCRYPTED: [u8; 48] = [
         220, 149, 192, 120, 162, 64, 137, 137, 173, 72, 162, 20, 146, 132, 32, 135, 220, 149, 192,
         120, 162, 64, 137, 137, 173, 72, 162, 20, 146, 132, 32, 135, 31, 120, 143, 230, 216, 108,

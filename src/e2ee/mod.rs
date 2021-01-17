@@ -1,4 +1,4 @@
-use self::aes::HarmonyAes;
+use self::aes::{HarmonyAes, KeySize};
 use crate::{api::secret, bail};
 use error::{E2EEError, E2EEResult, FanoutError, ImpureError};
 
@@ -164,8 +164,8 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
 
     pub fn register_channels(
         &mut self,
-        messages: (String, [u8; 32]),
-        state: (String, [u8; 32]),
+        messages: (String, KeySize),
+        state: (String, KeySize),
         users: Vec<u64>,
     ) {
         let (message_id, messages_key) = messages;
@@ -197,7 +197,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         &mut self,
         message_id: String,
         state_id: String,
-    ) -> ([u8; 32], [u8; 32]) {
+    ) -> (KeySize, KeySize) {
         use rand::RngCore;
 
         let mut csprng = OsRng {};
@@ -476,7 +476,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
 
             let key = &keys[&self.uid];
             let unenc = self.decrypt_using_privkey(key.key_data.clone())?;
-            let unenc_arr: [u8; 32] = unenc
+            let unenc_arr: KeySize = unenc
                 .try_into()
                 .map_err(|_| E2EEError::UnexpectedArraySize)?;
 
