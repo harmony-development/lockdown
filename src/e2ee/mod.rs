@@ -13,7 +13,8 @@ use rsa::{
 };
 use sha3::Sha3_512;
 
-mod aes;
+pub mod aes;
+/// Error types used in this library.
 pub mod error;
 
 type HmacSha512 = Hmac<Sha3_512>;
@@ -23,6 +24,7 @@ const SIGN_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Sign {
     hash: Some(Hash::SHA3_512),
 };
 
+/// Trait used for operations that need networking, which is not handled by this library.
 #[async_trait]
 pub trait Impure: std::fmt::Debug {
     async fn store_private_key(&mut self, data: Vec<u8>);
@@ -30,6 +32,7 @@ pub trait Impure: std::fmt::Debug {
     async fn get_public_key_for_user(&mut self, uid: u64) -> Option<String>;
 }
 
+/// E2EE client implementation.
 #[derive(Debug)]
 pub struct E2EEClient {
     impure: Box<dyn Impure>,
@@ -73,6 +76,7 @@ impl StreamStates {
             })
     }
 
+    #[allow(dead_code)]
     fn get_key(&mut self, stream_kind: StreamKind, stream_id: &str) -> Option<&HarmonyAes> {
         self.get(stream_kind, stream_id)
             .map(|(_, state)| match stream_kind {
@@ -96,6 +100,7 @@ struct StreamState {
     known_users: Vec<u64>,
 }
 
+/// Kind of a stream.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StreamKind {
     Message,
@@ -134,6 +139,7 @@ impl E2EEClient {
             uid,
         }
     }
+
     pub fn new_from_existing_data(
         impure: Box<dyn Impure>,
         uid: u64,
@@ -226,12 +232,7 @@ impl E2EEClient {
         (messages_key, state_key)
     }
 
-    fn decrypt_using_privkey(&self, data: Vec<u8>) -> E2EEResult<Vec<u8>> {
-        self.key
-            .decrypt(ENCRYPT_PADDING_SCHEME, &data)
-            .map_err(E2EEError::Decrypt)
-    }
-
+    /// Creates a serialized invite for other clients to consume.
     pub async fn create_invite(
         &mut self,
         messages_id: String,
@@ -280,6 +281,7 @@ impl E2EEClient {
         Ok(serialize_message(invite)?)
     }
 
+    /// Consumes a serialized invite.
     pub fn handle_invite(&mut self, invite: Vec<u8>) -> E2EEResult<()> {
         let secret::Invite {
             message_id,
@@ -323,7 +325,7 @@ impl E2EEClient {
         Ok(())
     }
 
-    /// message should always be a Flow in serialised form
+    /// Encrypts and signs a message. `message` should always be a Flow in serialised form.
     pub async fn encrypt_message(
         &mut self,
         for_channel: (StreamKind, String),
@@ -401,9 +403,11 @@ impl E2EEClient {
         Ok(serialize_message(encrypted_message)?)
     }
 
-    /// handle_message takes in the type of stream the message came from, the stream's ID, and
-    // the raw bytedata of the EncryptedMessage, and returns a tuple containing the message's author ID
-    // and its inner Flow.
+    /// Verifies signature and decrypts an encrypted message.
+    ///
+    /// Takes the type of stream the message came from, the stream's ID, and
+    /// the raw bytedata of the EncryptedMessage, and returns a tuple containing the message's author ID
+    /// and its inner Flow.
     pub async fn handle_message(
         &mut self,
         kind: StreamKind,
@@ -499,6 +503,12 @@ impl E2EEClient {
             self.cached_keys.insert(*for_uid, key);
             Ok(self.cached_keys.get(for_uid).unwrap())
         }
+    }
+
+    fn decrypt_using_privkey(&self, data: Vec<u8>) -> E2EEResult<Vec<u8>> {
+        self.key
+            .decrypt(ENCRYPT_PADDING_SCHEME, &data)
+            .map_err(E2EEError::Decrypt)
     }
 }
 

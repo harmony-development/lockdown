@@ -4,6 +4,7 @@ pub use prost::{DecodeError, EncodeError};
 pub use rsa::errors::Error as RsaError;
 pub use rsa::pem::PemError;
 
+/// Shorthand for `Result<R, E2EEError>`.
 pub type E2EEResult<R> = Result<R, E2EEError>;
 
 /// Errors that this library can produce.
