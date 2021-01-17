@@ -529,8 +529,6 @@
 <span id="526">526</span>
 <span id="527">527</span>
 <span id="528">528</span>
-<span id="529">529</span>
-<span id="530">530</span>
 </pre><div class="example-wrap"><pre class="rust ">
 <span class="kw">use</span> <span class="self">self</span>::<span class="ident">aes</span>::{<span class="ident">HarmonyAes</span>, <span class="ident">KeySize</span>};
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">api</span>::<span class="ident">secret</span>, <span class="ident">bail</span>};
@@ -766,7 +764,7 @@
         (<span class="ident">messages_key</span>, <span class="ident">state_key</span>)
     }
 
-    <span class="doccomment">/// Creates a serialized invite for other clients to consume.</span>
+    <span class="doccomment">/// Creates a (serialized) encrpyted invite for other clients to consume.</span>
     <span class="kw">pub</span> <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">create_invite</span>(
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
         <span class="ident">messages_id</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>,
@@ -783,45 +781,43 @@
 
         <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="ident">pubkey_from_pem</span>(<span class="self">self</span>.<span class="ident">impure</span>.<span class="ident">get_public_key_for_user</span>(<span class="ident">for_client</span>).<span class="ident">await</span><span class="question-mark">?</span>)<span class="question-mark">?</span>;
 
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encrypt_with_pubkey</span> <span class="op">=</span> <span class="op">|</span><span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]<span class="op">|</span> {
-            <span class="ident">pubkey</span>
-                .<span class="ident">encrypt</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">rng</span>, <span class="ident">ENCRYPT_PADDING_SCHEME</span>, <span class="ident">data</span>)
-                .<span class="ident">map_err</span>(<span class="ident">E2EEError</span>::<span class="ident">Encrypt</span>)
-        };
-
-        <span class="kw">let</span> <span class="ident">enc_message_key</span> <span class="op">=</span> <span class="ident">encrypt_with_pubkey</span>(<span class="kw-2">&amp;</span><span class="ident">state</span>.<span class="ident">messages_key</span>.<span class="ident">get_key</span>())<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">enc_state_key</span> <span class="op">=</span> <span class="ident">encrypt_with_pubkey</span>(<span class="kw-2">&amp;</span><span class="ident">state</span>.<span class="ident">state_key</span>.<span class="ident">get_key</span>())<span class="question-mark">?</span>;
-
-        <span class="kw">let</span> <span class="ident">invite</span> <span class="op">=</span> <span class="ident">secret</span>::<span class="ident">Invite</span> {
+        <span class="kw">let</span> <span class="ident">serialized_invite</span> <span class="op">=</span> <span class="ident">serialize_message</span>(<span class="ident">secret</span>::<span class="ident">Invite</span> {
             <span class="ident">message_id</span>: <span class="ident">id</span>.<span class="ident">message_id</span>.<span class="ident">clone</span>(),
             <span class="ident">state_id</span>: <span class="ident">id</span>.<span class="ident">state_id</span>.<span class="ident">clone</span>(),
-            <span class="ident">message_key</span>: <span class="ident">enc_message_key</span>,
-            <span class="ident">state_key</span>: <span class="ident">enc_state_key</span>,
+            <span class="ident">message_key</span>: <span class="ident">state</span>.<span class="ident">messages_key</span>.<span class="ident">get_key</span>().<span class="ident">to_vec</span>(),
+            <span class="ident">state_key</span>: <span class="ident">state</span>.<span class="ident">state_key</span>.<span class="ident">get_key</span>().<span class="ident">to_vec</span>(),
             <span class="ident">known_users</span>: {
                 <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">users</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">known_users</span>.<span class="ident">clone</span>();
                 <span class="comment">// Invite receiver will need to know sender&#39;s known users + sender</span>
                 <span class="ident">users</span>.<span class="ident">push</span>(<span class="self">self</span>.<span class="ident">uid</span>);
                 <span class="ident">users</span>
             },
+        })<span class="question-mark">?</span>;
+
+        <span class="kw">let</span> <span class="ident">encrypted_invite</span> <span class="op">=</span> <span class="ident">secret</span>::<span class="ident">EncryptedInvite</span> {
+            <span class="ident">invite</span>: <span class="ident">pubkey</span>
+                .<span class="ident">encrypt</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">OsRng</span>, <span class="ident">ENCRYPT_PADDING_SCHEME</span>, <span class="kw-2">&amp;</span><span class="ident">serialized_invite</span>)
+                .<span class="ident">map_err</span>(<span class="ident">E2EEError</span>::<span class="ident">Encrypt</span>)<span class="question-mark">?</span>,
         };
 
         <span class="ident">state</span>.<span class="ident">known_users</span>.<span class="ident">push</span>(<span class="ident">for_client</span>);
-        <span class="prelude-val">Ok</span>(<span class="ident">serialize_message</span>(<span class="ident">invite</span>)<span class="question-mark">?</span>)
+        <span class="prelude-val">Ok</span>(<span class="ident">serialize_message</span>(<span class="ident">encrypted_invite</span>)<span class="question-mark">?</span>)
     }
 
-    <span class="doccomment">/// Consumes a serialized invite.</span>
-    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">handle_invite</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">invite</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span>(), <span class="ident">ImpErr</span><span class="op">&gt;</span> {
+    <span class="doccomment">/// Consumes a (serialized) encrypted invite.</span>
+    <span class="kw">pub</span> <span class="kw">fn</span> <span class="ident">handle_invite</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">encrypted_invite</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span>(), <span class="ident">ImpErr</span><span class="op">&gt;</span> {
+        <span class="kw">let</span> <span class="ident">secret</span>::<span class="ident">EncryptedInvite</span> { <span class="ident">invite</span>: <span class="ident">enc_invite</span> } <span class="op">=</span>
+            <span class="ident">deser_message</span>(<span class="ident">encrypted_invite</span>.<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
+
+        <span class="kw">let</span> <span class="ident">decrypted_invite</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">decrypt_using_privkey</span>(<span class="ident">enc_invite</span>)<span class="question-mark">?</span>;
+
         <span class="kw">let</span> <span class="ident">secret</span>::<span class="ident">Invite</span> {
             <span class="ident">message_id</span>,
             <span class="ident">state_id</span>,
-            <span class="ident">message_key</span>: <span class="ident">enc_message_key</span>,
-            <span class="ident">state_key</span>: <span class="ident">enc_state_key</span>,
+            <span class="ident">message_key</span>,
+            <span class="ident">state_key</span>,
             <span class="ident">known_users</span>,
-        } <span class="op">=</span> <span class="ident">deser_message</span>(<span class="ident">invite</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>;
-
-        <span class="kw">let</span> <span class="ident">message_key</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">decrypt_using_privkey</span>(<span class="ident">enc_message_key</span>)<span class="question-mark">?</span>;
-        <span class="kw">let</span> <span class="ident">state_key</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">decrypt_using_privkey</span>(<span class="ident">enc_state_key</span>)<span class="question-mark">?</span>;
+        } <span class="op">=</span> <span class="ident">deser_message</span>(<span class="kw-2">&amp;</span><span class="ident">decrypted_invite</span>)<span class="question-mark">?</span>;
 
         <span class="kw">let</span> <span class="ident">id</span> <span class="op">=</span> <span class="ident">StreamId</span> {
             <span class="ident">message_id</span>,
@@ -1030,9 +1026,9 @@
         <span class="prelude-val">Ok</span>((<span class="ident">signed_msg</span>.<span class="ident">from_user</span>, <span class="ident">signed_msg</span>.<span class="ident">message</span>))
     }
 
-    <span class="kw">fn</span> <span class="ident">decrypt_using_privkey</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">ImpErr</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">decrypt_using_privkey</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">ImpErr</span><span class="op">&gt;</span> {
         <span class="self">self</span>.<span class="ident">key</span>
-            .<span class="ident">decrypt</span>(<span class="ident">ENCRYPT_PADDING_SCHEME</span>, <span class="kw-2">&amp;</span><span class="ident">data</span>)
+            .<span class="ident">decrypt</span>(<span class="ident">ENCRYPT_PADDING_SCHEME</span>, <span class="ident">data</span>.<span class="ident">as_ref</span>())
             .<span class="ident">map_err</span>(<span class="ident">E2EEError</span>::<span class="ident">Decrypt</span>)
     }
 }
