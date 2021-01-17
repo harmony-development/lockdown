@@ -27,9 +27,12 @@ const SIGN_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Sign {
 /// Trait used for operations that need networking, which is not handled by this library.
 #[async_trait]
 pub trait Impure<Error: ImpureError>: std::fmt::Debug {
+    /// Stores a private key in the server.
     async fn store_private_key(&mut self, data: Vec<u8>) -> Result<(), Error>;
+    /// Publishes a public key to the server.
     async fn publish_public_key(&mut self, data: String) -> Result<(), Error>;
-    async fn get_public_key_for_user(&mut self, uid: u64) -> Result<Option<String>, Error>;
+    /// Gets the public key for a user. It is recommended to implement a cache mechanism for keys.
+    async fn get_public_key_for_user(&mut self, uid: u64) -> Result<String, Error>;
 }
 
 /// E2EE client implementation.
@@ -38,7 +41,6 @@ pub struct E2EEClient<ImpErr: ImpureError> {
     impure: Box<dyn Impure<ImpErr>>,
     stream_states: StreamStates,
     key: RSAPrivateKey,
-    cached_keys: HashMap<u64, RSAPublicKey>,
     uid: u64,
 }
 
@@ -135,7 +137,6 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
             impure,
             stream_states: StreamStates::default(),
             key: priv_key,
-            cached_keys: HashMap::new(),
             uid,
         })
     }
@@ -157,7 +158,6 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
             impure,
             stream_states: StreamStates::default(),
             key: keypair,
-            cached_keys: HashMap::new(),
             uid,
         })
     }
@@ -235,7 +235,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
     /// Creates a serialized invite for other clients to consume.
     pub async fn create_invite(
         &mut self,
-        messages_id: String,
+        messages_id: impl AsRef<str>,
         for_client: u64,
     ) -> E2EEResult<Vec<u8>, ImpErr> {
         log::trace!(
@@ -244,15 +244,10 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         );
         let (id, state) = self
             .stream_states
-            .get_mut(StreamKind::Message, &messages_id)
+            .get_mut(StreamKind::Message, messages_id.as_ref())
             .unwrap();
 
-        let pubkey = pubkey_from_pem(
-            self.impure
-                .get_public_key_for_user(for_client)
-                .await?
-                .expect("expected user key"),
-        )?;
+        let pubkey = pubkey_from_pem(self.impure.get_public_key_for_user(for_client).await?)?;
 
         let mut rng = OsRng;
         let mut encrypt_with_pubkey = |data: &[u8]| {
@@ -328,16 +323,15 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
     /// Encrypts and signs a message. `message` should always be a Flow in serialised form.
     pub async fn encrypt_message(
         &mut self,
-        for_channel: (StreamKind, String),
-        message: Vec<u8>,
+        stream_kind: StreamKind,
+        stream_id: impl AsRef<str>,
+        message: impl AsRef<[u8]>,
     ) -> E2EEResult<Vec<u8>, ImpErr> {
         let mut csprng = OsRng;
 
-        let (kind, stream_id) = for_channel;
-
         let known_users = self
             .stream_states
-            .get(kind, &stream_id)
+            .get(stream_kind, stream_id.as_ref())
             .unwrap()
             .1
             .known_users
@@ -354,7 +348,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
             key
         };
 
-        let hasher = HmacSha512::new_varkey(message.as_slice()).expect("key was invalid size");
+        let hasher = HmacSha512::new_varkey(message.as_ref()).expect("key was invalid size");
         let hashed_message = hasher.finalize().into_bytes();
         // sign the message data
         let signature = self
@@ -364,7 +358,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
 
         // create the message
         let signed = secret::SignedMessage {
-            message,
+            message: message.as_ref().to_vec(),
             signature,
             // create the fanout...
             fanout: Some(secret::Fanout {
@@ -372,7 +366,8 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
                     let mut map = HashMap::new();
 
                     for user in known_users {
-                        let pubkey = self.ensure_has_key(&user).await?;
+                        let pubkey =
+                            pubkey_from_pem(self.impure.get_public_key_for_user(user).await?)?;
                         let key_data = pubkey
                             .encrypt(&mut csprng, ENCRYPT_PADDING_SCHEME, &new_key)
                             .map_err(E2EEError::Encrypt)?;
@@ -388,7 +383,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
 
         let state_key = self
             .stream_states
-            .get_mut_key(kind, &stream_id)
+            .get_mut_key(stream_kind, stream_id.as_ref())
             .expect("expected key");
 
         let signed_bytes = serialize_message(signed)?;
@@ -411,21 +406,19 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
     pub async fn handle_message(
         &mut self,
         kind: StreamKind,
-        stream_id: String,
-        data: Vec<u8>,
+        stream_id: impl AsRef<str>,
+        data: impl AsRef<[u8]>,
     ) -> E2EEResult<(u64, Vec<u8>), ImpErr> {
-        use prost::Message;
-
-        let mut msg: secret::EncryptedMessage = Default::default();
-        msg.merge(data.as_slice())?;
+        let msg: secret::EncryptedMessage = deser_message(data.as_ref())?;
 
         log::trace!(
-            "Handling message: stream_kind: {:?} stream_id: {:?}\n {:?}",
+            "Client id: {}\n\nHandling message: stream_kind: {:?} stream_id: {:?}\n {:?}",
+            self.uid,
             kind,
-            stream_id,
+            stream_id.as_ref(),
             self.stream_states
         );
-        let (_, state) = self.stream_states.get(kind, &stream_id).unwrap();
+        let (_, state) = self.stream_states.get(kind, stream_id.as_ref()).unwrap();
         let decrypted = match kind {
             StreamKind::Message => state.messages_key.decrypt(msg.message),
             StreamKind::State => state.state_key.decrypt(msg.message),
@@ -437,8 +430,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         let sender_pubkey = pubkey_from_pem(
             self.impure
                 .get_public_key_for_user(signed_msg.from_user)
-                .await?
-                .expect("sender key"),
+                .await?,
         )?;
 
         // Verify signature
@@ -481,28 +473,12 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
                 .map_err(|_| E2EEError::UnexpectedArraySize)?;
 
             self.stream_states
-                .get_mut_key(kind, &stream_id)
+                .get_mut_key(kind, stream_id.as_ref())
                 .unwrap()
                 .set_key(unenc_arr);
         };
 
         Ok((signed_msg.from_user, signed_msg.message))
-    }
-
-    #[allow(clippy::map_entry)]
-    async fn ensure_has_key(&mut self, for_uid: &u64) -> E2EEResult<&RSAPublicKey, ImpErr> {
-        if self.cached_keys.contains_key(for_uid) {
-            Ok(self.cached_keys.get(for_uid).unwrap())
-        } else {
-            let pem = self
-                .impure
-                .get_public_key_for_user(*for_uid)
-                .await?
-                .ok_or(E2EEError::Fanout(FanoutError::UserIdMissing(*for_uid)))?;
-            let key = pubkey_from_pem(pem)?;
-            self.cached_keys.insert(*for_uid, key);
-            Ok(self.cached_keys.get(for_uid).unwrap())
-        }
     }
 
     fn decrypt_using_privkey(&self, data: Vec<u8>) -> E2EEResult<Vec<u8>, ImpErr> {

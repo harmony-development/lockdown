@@ -10,37 +10,35 @@ use std::{
 use prost::EncodeError;
 use rand::Rng;
 
-type Poki<T> = Arc<Mutex<T>>;
-
 #[derive(Debug)]
 struct TestImpureServer {
-    private_keys: HashMap<u64, Vec<u8>>,
-    public_keys: HashMap<u64, String>,
-    channels: HashMap<String, Vec<Vec<u8>>>,
+    private_keys: Mutex<HashMap<u64, Vec<u8>>>,
+    public_keys: Mutex<HashMap<u64, String>>,
+    channels: Mutex<HashMap<String, Vec<Vec<u8>>>>,
 }
 
 impl TestImpureServer {
     fn new() -> Self {
         TestImpureServer {
-            private_keys: HashMap::new(),
-            public_keys: HashMap::new(),
-            channels: HashMap::new(),
+            private_keys: Mutex::new(HashMap::new()),
+            public_keys: Mutex::new(HashMap::new()),
+            channels: Mutex::new(HashMap::new()),
         }
     }
 
-    fn store_private_key(&mut self, id: u64, key: Vec<u8>) {
-        self.private_keys.insert(id, key);
+    fn store_private_key(&self, id: u64, key: Vec<u8>) {
+        self.private_keys.lock().expect("aaa").insert(id, key);
     }
 
-    fn publish_public_key(&mut self, id: u64, key: String) {
-        self.public_keys.insert(id, key);
+    fn publish_public_key(&self, id: u64, key: String) {
+        self.public_keys.lock().expect("aaa").insert(id, key);
     }
 
     fn get_public_key_for_user(&self, id: &u64) -> Option<String> {
-        self.public_keys.get(id).cloned()
+        self.public_keys.lock().expect("aaa").get(id).cloned()
     }
 
-    fn new_channels(&mut self) -> (String, String) {
+    fn new_channels(&self) -> (String, String) {
         let rng = rand::thread_rng();
         let mid: String = rng
             .sample_iter(rand::distributions::Alphanumeric)
@@ -53,8 +51,14 @@ impl TestImpureServer {
             .map(char::from)
             .collect();
 
-        self.channels.insert(mid.clone(), Vec::new());
-        self.channels.insert(sid.clone(), Vec::new());
+        self.channels
+            .lock()
+            .expect("aaa")
+            .insert(mid.clone(), Vec::new());
+        self.channels
+            .lock()
+            .expect("aaa")
+            .insert(sid.clone(), Vec::new());
 
         (mid, sid)
     }
@@ -62,12 +66,12 @@ impl TestImpureServer {
 
 #[derive(Debug)]
 struct TestImpure {
-    server: Poki<TestImpureServer>,
+    server: Arc<TestImpureServer>,
     uid: u64,
 }
 
 impl TestImpure {
-    fn new(server: Poki<TestImpureServer>) -> (Self, u64) {
+    fn new(server: Arc<TestImpureServer>) -> (Self, u64) {
         let mut rng = rand::thread_rng();
         let data = rng.gen::<u64>();
 
@@ -78,27 +82,20 @@ impl TestImpure {
 #[async_trait::async_trait]
 impl Impure<Infallible> for TestImpure {
     async fn store_private_key(&mut self, data: Vec<u8>) -> Result<(), Infallible> {
-        self.server
-            .lock()
-            .expect("mutex poisoned")
-            .store_private_key(self.uid, data);
+        self.server.store_private_key(self.uid, data);
         Ok(())
     }
 
     async fn publish_public_key(&mut self, data: String) -> Result<(), Infallible> {
-        self.server
-            .lock()
-            .expect("mutex poisoned")
-            .publish_public_key(self.uid, data);
+        self.server.publish_public_key(self.uid, data);
         Ok(())
     }
 
-    async fn get_public_key_for_user(&mut self, uid: u64) -> Result<Option<String>, Infallible> {
+    async fn get_public_key_for_user(&mut self, uid: u64) -> Result<String, Infallible> {
         Ok(self
             .server
-            .lock()
-            .expect("mutex poisoned")
-            .get_public_key_for_user(&uid))
+            .get_public_key_for_user(&uid)
+            .expect("cant happen"))
     }
 }
 
@@ -121,7 +118,7 @@ async fn client_creation() {
 
     const PASSWORD: &str = "very strong password";
 
-    let server = Poki::new(Mutex::new(TestImpureServer::new()));
+    let server = Arc::new(TestImpureServer::new());
     let (impure, client_id) = TestImpure::new(server);
     E2EEClient::new_with_new_data(Box::new(impure), client_id, PASSWORD.into())
         .await
@@ -132,7 +129,7 @@ async fn client_creation() {
 async fn exchange_messages() {
     init();
 
-    let server = Poki::new(Mutex::new(TestImpureServer::new()));
+    let server = Arc::new(TestImpureServer::new());
     log::info!("server");
 
     let (impure_one, client_one_id) = TestImpure::new(server.clone());
@@ -151,7 +148,7 @@ async fn exchange_messages() {
             .unwrap();
     log::info!("client two");
 
-    let (messages_chan, state_chan) = server.lock().expect("mutex poisoned").new_channels();
+    let (messages_chan, state_chan) = server.new_channels();
     log::info!("channenls");
     client_one.prepare_channel_keys(messages_chan.clone(), state_chan);
     log::info!("keys");
@@ -176,16 +173,13 @@ async fn exchange_messages() {
     log::info!("test data");
 
     let encrypted = client_one
-        .encrypt_message(
-            (StreamKind::Message, messages_chan.clone()),
-            test_data.clone(),
-        )
+        .encrypt_message(StreamKind::Message, &messages_chan, test_data.as_slice())
         .await
         .expect("failure encrypting");
     log::info!("client one enctrpy test data");
 
     let (user_id, data) = client_two
-        .handle_message(StreamKind::Message, messages_chan.clone(), encrypted)
+        .handle_message(StreamKind::Message, &messages_chan, &encrypted)
         .await
         .expect("failure decrypting");
     log::info!("client two decrtpye encrypted test data");
@@ -206,15 +200,16 @@ async fn exchange_messages() {
 
     let encrypted_two = client_two
         .encrypt_message(
-            (StreamKind::Message, messages_chan.clone()),
-            test_data_two.clone(),
+            StreamKind::Message,
+            &messages_chan,
+            test_data_two.as_slice(),
         )
         .await
         .expect("failure encrypting");
     log::info!("client two encrypt test data two");
 
     let (user_id_two, data_two) = client_one
-        .handle_message(StreamKind::Message, messages_chan, encrypted_two)
+        .handle_message(StreamKind::Message, &messages_chan, &encrypted_two)
         .await
         .expect("failure decrypting");
     log::info!("client one decsrypt encryprted test data two");
