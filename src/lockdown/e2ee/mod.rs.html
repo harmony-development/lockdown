@@ -506,6 +506,24 @@
 <span id="503">503</span>
 <span id="504">504</span>
 <span id="505">505</span>
+<span id="506">506</span>
+<span id="507">507</span>
+<span id="508">508</span>
+<span id="509">509</span>
+<span id="510">510</span>
+<span id="511">511</span>
+<span id="512">512</span>
+<span id="513">513</span>
+<span id="514">514</span>
+<span id="515">515</span>
+<span id="516">516</span>
+<span id="517">517</span>
+<span id="518">518</span>
+<span id="519">519</span>
+<span id="520">520</span>
+<span id="521">521</span>
+<span id="522">522</span>
+<span id="523">523</span>
 </pre><div class="example-wrap"><pre class="rust ">
 <span class="kw">use</span> <span class="self">self</span>::<span class="ident">aes</span>::<span class="ident">HarmonyAes</span>;
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">api</span>::<span class="ident">secret</span>, <span class="ident">bail</span>};
@@ -544,6 +562,7 @@
     <span class="ident">impure</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">dyn</span> <span class="ident">Impure</span><span class="op">&gt;</span>,
     <span class="ident">stream_states</span>: <span class="ident">StreamStates</span>,
     <span class="ident">key</span>: <span class="ident">RSAPrivateKey</span>,
+    <span class="ident">cached_keys</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">u64</span>, <span class="ident">RSAPublicKey</span><span class="op">&gt;</span>,
     <span class="ident">uid</span>: <span class="ident">u64</span>,
 }
 
@@ -638,6 +657,7 @@
             <span class="ident">impure</span>,
             <span class="ident">stream_states</span>: <span class="ident">StreamStates</span>::<span class="ident">default</span>(),
             <span class="ident">key</span>: <span class="ident">priv_key</span>,
+            <span class="ident">cached_keys</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">uid</span>,
         }
     }
@@ -658,6 +678,7 @@
             <span class="ident">impure</span>,
             <span class="ident">stream_states</span>: <span class="ident">StreamStates</span>::<span class="ident">default</span>(),
             <span class="ident">key</span>: <span class="ident">keypair</span>,
+            <span class="ident">cached_keys</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">uid</span>,
         })
     }
@@ -838,12 +859,14 @@
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">csprng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
 
         <span class="kw">let</span> (<span class="ident">kind</span>, <span class="ident">stream_id</span>) <span class="op">=</span> <span class="ident">for_channel</span>;
-        <span class="comment">// let&#39;s fetch us some state keys</span>
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">state</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">stream_states</span>.<span class="ident">get_mut</span>(<span class="ident">kind</span>, <span class="kw-2">&amp;</span><span class="ident">stream_id</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">state_key</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">kind</span> {
-            <span class="ident">StreamKind</span>::<span class="ident">Message</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">state</span>.<span class="ident">messages_key</span>,
-            <span class="ident">StreamKind</span>::<span class="ident">State</span> <span class="op">=</span><span class="op">&gt;</span> <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">state</span>.<span class="ident">state_key</span>,
-        };
+
+        <span class="kw">let</span> <span class="ident">known_users</span> <span class="op">=</span> <span class="self">self</span>
+            .<span class="ident">stream_states</span>
+            .<span class="ident">get</span>(<span class="ident">kind</span>, <span class="kw-2">&amp;</span><span class="ident">stream_id</span>)
+            .<span class="ident">unwrap</span>()
+            .<span class="number">1</span>
+            .<span class="ident">known_users</span>
+            .<span class="ident">clone</span>();
 
         <span class="comment">// generate the new key</span>
         <span class="kw">let</span> <span class="ident">new_key</span> <span class="op">=</span> {
@@ -873,18 +896,13 @@
                 <span class="ident">keys</span>: {
                     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">HashMap</span>::<span class="ident">new</span>();
 
-                    <span class="kw">for</span> <span class="ident">user</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">state</span>.<span class="ident">known_users</span> {
-                        <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="ident">pubkey_from_pem</span>(
-                            <span class="self">self</span>.<span class="ident">impure</span>
-                                .<span class="ident">get_public_key_for_user</span>(<span class="kw-2">*</span><span class="ident">user</span>)
-                                .<span class="ident">await</span>
-                                .<span class="ident">expect</span>(<span class="string">&quot;user key&quot;</span>),
-                        )<span class="question-mark">?</span>;
+                    <span class="kw">for</span> <span class="ident">user</span> <span class="kw">in</span> <span class="ident">known_users</span> {
+                        <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ensure_has_key</span>(<span class="kw-2">&amp;</span><span class="ident">user</span>).<span class="ident">await</span><span class="question-mark">?</span>;
                         <span class="kw">let</span> <span class="ident">key_data</span> <span class="op">=</span> <span class="ident">pubkey</span>
                             .<span class="ident">encrypt</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">csprng</span>, <span class="ident">ENCRYPT_PADDING_SCHEME</span>, <span class="kw-2">&amp;</span><span class="ident">new_key</span>)
                             .<span class="ident">map_err</span>(<span class="ident">E2EEError</span>::<span class="ident">Encrypt</span>)<span class="question-mark">?</span>;
 
-                        <span class="ident">map</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">user</span>, <span class="ident">secret</span>::<span class="ident">Key</span> { <span class="ident">key_data</span> });
+                        <span class="ident">map</span>.<span class="ident">insert</span>(<span class="ident">user</span>, <span class="ident">secret</span>::<span class="ident">Key</span> { <span class="ident">key_data</span> });
                     }
 
                     <span class="ident">map</span>
@@ -892,6 +910,11 @@
             }),
             <span class="ident">from_user</span>: <span class="self">self</span>.<span class="ident">uid</span>,
         };
+
+        <span class="kw">let</span> <span class="ident">state_key</span> <span class="op">=</span> <span class="self">self</span>
+            .<span class="ident">stream_states</span>
+            .<span class="ident">get_mut_key</span>(<span class="ident">kind</span>, <span class="kw-2">&amp;</span><span class="ident">stream_id</span>)
+            .<span class="ident">expect</span>(<span class="string">&quot;expected key&quot;</span>);
 
         <span class="kw">let</span> <span class="ident">signed_bytes</span> <span class="op">=</span> <span class="ident">serialize_message</span>(<span class="ident">signed</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">encrypted</span> <span class="op">=</span> <span class="ident">state_key</span>.<span class="ident">encrypt</span>(<span class="ident">signed_bytes</span>);
@@ -930,6 +953,7 @@
             <span class="ident">StreamKind</span>::<span class="ident">Message</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">state</span>.<span class="ident">messages_key</span>.<span class="ident">decrypt</span>(<span class="ident">msg</span>.<span class="ident">message</span>),
             <span class="ident">StreamKind</span>::<span class="ident">State</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">state</span>.<span class="ident">state_key</span>.<span class="ident">decrypt</span>(<span class="ident">msg</span>.<span class="ident">message</span>),
         };
+        <span class="kw">let</span> <span class="ident">known_users</span> <span class="op">=</span> <span class="ident">state</span>.<span class="ident">known_users</span>.<span class="ident">clone</span>();
 
         <span class="kw">let</span> <span class="ident">signed_msg</span>: <span class="ident">secret</span>::<span class="ident">SignedMessage</span> <span class="op">=</span> <span class="ident">deser_message</span>(<span class="ident">decrypted</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>;
 
@@ -955,14 +979,14 @@
         <span class="kw">if</span> <span class="kw">let</span> <span class="prelude-val">Some</span>(<span class="ident">fanout</span>) <span class="op">=</span> <span class="ident">signed_msg</span>.<span class="ident">fanout</span> {
             <span class="kw">let</span> <span class="ident">keys</span>: <span class="kw-2">&amp;</span><span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">u64</span>, <span class="ident">secret</span>::<span class="ident">Key</span><span class="op">&gt;</span> <span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">fanout</span>.<span class="ident">keys</span>;
 
-            <span class="kw">if</span> <span class="ident">keys</span>.<span class="ident">len</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">state</span>.<span class="ident">known_users</span>.<span class="ident">len</span>() {
+            <span class="kw">if</span> <span class="ident">keys</span>.<span class="ident">len</span>() <span class="op">!</span><span class="op">=</span> <span class="ident">known_users</span>.<span class="ident">len</span>() {
                 <span class="macro">bail</span><span class="macro">!</span>(<span class="ident">FanoutError</span>::<span class="ident">LengthNotEqual</span> {
-                    <span class="ident">known_users</span>: <span class="ident">state</span>.<span class="ident">known_users</span>.<span class="ident">len</span>(),
+                    <span class="ident">known_users</span>: <span class="ident">known_users</span>.<span class="ident">len</span>(),
                     <span class="ident">key_count</span>: <span class="ident">keys</span>.<span class="ident">len</span>(),
                 })
             }
 
-            <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">state</span>.<span class="ident">known_users</span> {
+            <span class="kw">for</span> <span class="ident">key</span> <span class="kw">in</span> <span class="kw-2">&amp;</span><span class="ident">known_users</span> {
                 <span class="comment">// Don&#39;t check for senders key, since we trust them already</span>
                 <span class="kw">if</span> <span class="ident">key</span> <span class="op">!</span><span class="op">=</span> <span class="kw-2">&amp;</span><span class="ident">signed_msg</span>.<span class="ident">from_user</span> <span class="op">&amp;&amp;</span> <span class="op">!</span><span class="ident">keys</span>.<span class="ident">contains_key</span>(<span class="ident">key</span>) {
                     <span class="macro">bail</span><span class="macro">!</span>(<span class="ident">FanoutError</span>::<span class="ident">UserIdMissing</span>(<span class="kw-2">*</span><span class="ident">key</span>));
@@ -985,11 +1009,23 @@
                 .<span class="ident">set_key</span>(<span class="ident">unenc_arr</span>);
         };
 
-        <span class="comment">// TODO:</span>
-        <span class="comment">// add &quot;ensure has key&quot; method which looks up public keys in a cache, falls back to impure, and then finally errors if it can&#39;t find any</span>
-        <span class="comment">// verify byte data of signed_msg.message using signed_msg.signature and signed_msg.from_user</span>
-
         <span class="prelude-val">Ok</span>((<span class="ident">signed_msg</span>.<span class="ident">from_user</span>, <span class="ident">signed_msg</span>.<span class="ident">message</span>))
+    }
+
+    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy</span>::<span class="ident">map_entry</span>)]</span>
+    <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">ensure_has_key</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">for_uid</span>: <span class="kw-2">&amp;</span><span class="ident">u64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">RSAPublicKey</span><span class="op">&gt;</span> {
+        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">contains_key</span>(<span class="ident">for_uid</span>) {
+            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">get</span>(<span class="ident">for_uid</span>).<span class="ident">unwrap</span>())
+        } <span class="kw">else</span> {
+            <span class="kw">let</span> <span class="ident">pem</span> <span class="op">=</span> <span class="self">self</span>
+                .<span class="ident">impure</span>
+                .<span class="ident">get_public_key_for_user</span>(<span class="kw-2">*</span><span class="ident">for_uid</span>)
+                .<span class="ident">await</span>
+                .<span class="ident">ok_or</span>(<span class="ident">E2EEError</span>::<span class="ident">Fanout</span>(<span class="ident">FanoutError</span>::<span class="ident">UserIdMissing</span>(<span class="kw-2">*</span><span class="ident">for_uid</span>)))<span class="question-mark">?</span>;
+            <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">pubkey_from_pem</span>(<span class="ident">pem</span>)<span class="question-mark">?</span>;
+            <span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">for_uid</span>, <span class="ident">key</span>);
+            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">get</span>(<span class="ident">for_uid</span>).<span class="ident">unwrap</span>())
+        }
     }
 }
 
