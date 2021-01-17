@@ -232,7 +232,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         (messages_key, state_key)
     }
 
-    /// Creates a serialized invite for other clients to consume.
+    /// Creates a (serialized) encrpyted invite for other clients to consume.
     pub async fn create_invite(
         &mut self,
         messages_id: impl AsRef<str>,
@@ -249,45 +249,43 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
 
         let pubkey = pubkey_from_pem(self.impure.get_public_key_for_user(for_client).await?)?;
 
-        let mut rng = OsRng;
-        let mut encrypt_with_pubkey = |data: &[u8]| {
-            pubkey
-                .encrypt(&mut rng, ENCRYPT_PADDING_SCHEME, data)
-                .map_err(E2EEError::Encrypt)
-        };
-
-        let enc_message_key = encrypt_with_pubkey(&state.messages_key.get_key())?;
-        let enc_state_key = encrypt_with_pubkey(&state.state_key.get_key())?;
-
-        let invite = secret::Invite {
+        let serialized_invite = serialize_message(secret::Invite {
             message_id: id.message_id.clone(),
             state_id: id.state_id.clone(),
-            message_key: enc_message_key,
-            state_key: enc_state_key,
+            message_key: state.messages_key.get_key().to_vec(),
+            state_key: state.state_key.get_key().to_vec(),
             known_users: {
                 let mut users = state.known_users.clone();
                 // Invite receiver will need to know sender's known users + sender
                 users.push(self.uid);
                 users
             },
+        })?;
+
+        let encrypted_invite = secret::EncryptedInvite {
+            invite: pubkey
+                .encrypt(&mut OsRng, ENCRYPT_PADDING_SCHEME, &serialized_invite)
+                .map_err(E2EEError::Encrypt)?,
         };
 
         state.known_users.push(for_client);
-        Ok(serialize_message(invite)?)
+        Ok(serialize_message(encrypted_invite)?)
     }
 
-    /// Consumes a serialized invite.
-    pub fn handle_invite(&mut self, invite: Vec<u8>) -> E2EEResult<(), ImpErr> {
+    /// Consumes a (serialized) encrypted invite.
+    pub fn handle_invite(&mut self, encrypted_invite: impl AsRef<[u8]>) -> E2EEResult<(), ImpErr> {
+        let secret::EncryptedInvite { invite: enc_invite } =
+            deser_message(encrypted_invite.as_ref())?;
+
+        let decrypted_invite = self.decrypt_using_privkey(enc_invite)?;
+
         let secret::Invite {
             message_id,
             state_id,
-            message_key: enc_message_key,
-            state_key: enc_state_key,
+            message_key,
+            state_key,
             known_users,
-        } = deser_message(invite.as_slice())?;
-
-        let message_key = self.decrypt_using_privkey(enc_message_key)?;
-        let state_key = self.decrypt_using_privkey(enc_state_key)?;
+        } = deser_message(&decrypted_invite)?;
 
         let id = StreamId {
             message_id,
@@ -496,9 +494,9 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         Ok((signed_msg.from_user, signed_msg.message))
     }
 
-    fn decrypt_using_privkey(&self, data: Vec<u8>) -> E2EEResult<Vec<u8>, ImpErr> {
+    fn decrypt_using_privkey(&self, data: impl AsRef<[u8]>) -> E2EEResult<Vec<u8>, ImpErr> {
         self.key
-            .decrypt(ENCRYPT_PADDING_SCHEME, &data)
+            .decrypt(ENCRYPT_PADDING_SCHEME, data.as_ref())
             .map_err(E2EEError::Decrypt)
     }
 }
