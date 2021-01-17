@@ -1,1 +1,1 @@
-initSidebarItems({"mod":[["harmonytypes",""],["secret",""]]});
+initSidebarItems({"mod":[["harmonytypes","Common types used by other services."],["secret","E2EE secret service."]]});

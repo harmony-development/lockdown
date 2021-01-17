@@ -1,1 +1,1 @@
-initSidebarItems({"enum":[["StreamKind",""]],"mod":[["error",""]],"struct":[["E2EEClient",""]],"trait":[["Impure",""]]});
+initSidebarItems({"enum":[["StreamKind","Kind of a stream."]],"mod":[["aes",""],["error","Error types used in this library."]],"struct":[["E2EEClient","E2EE client implementation."]],"trait":[["Impure","Trait used for operations that need networking, which is not handled by this library."]]});

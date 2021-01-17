@@ -1,1 +1,1 @@
-initSidebarItems({"mod":[["api",""],["e2ee",""]]});
+initSidebarItems({"mod":[["api","Generated code from protobuf protocol files (secret service and common Harmony types)."],["e2ee","E2EE implementation for the Harmony protocol."]]});

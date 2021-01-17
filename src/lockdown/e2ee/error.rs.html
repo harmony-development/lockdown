@@ -145,6 +145,21 @@
 <span id="142">142</span>
 <span id="143">143</span>
 <span id="144">144</span>
+<span id="145">145</span>
+<span id="146">146</span>
+<span id="147">147</span>
+<span id="148">148</span>
+<span id="149">149</span>
+<span id="150">150</span>
+<span id="151">151</span>
+<span id="152">152</span>
+<span id="153">153</span>
+<span id="154">154</span>
+<span id="155">155</span>
+<span id="156">156</span>
+<span id="157">157</span>
+<span id="158">158</span>
+<span id="159">159</span>
 </pre><div class="example-wrap"><pre class="rust ">
 <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">fmt</span>::{<span class="self">self</span>, <span class="ident">Display</span>, <span class="ident">Formatter</span>};
 
@@ -152,11 +167,15 @@
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">rsa</span>::<span class="ident">errors</span>::<span class="ident">Error</span> <span class="kw">as</span> <span class="ident">RsaError</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">rsa</span>::<span class="ident">pem</span>::<span class="ident">PemError</span>;
 
-<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">R</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">E2EEError</span><span class="op">&gt;</span>;
+<span class="doccomment">/// Shorthand for `Result&lt;R, E2EEError&gt;`.</span>
+<span class="kw">pub</span> <span class="kw">type</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">ImpureError</span><span class="op">&gt;</span><span class="op">&gt;</span>;
+
+<span class="doccomment">/// Superset trait that `Impure` trait error needs to implement.</span>
+<span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">ImpureError</span>: <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="ident">Debug</span> <span class="op">+</span> <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="ident">Display</span> {}
 
 <span class="doccomment">/// Errors that this library can produce.</span>
 <span class="attribute">#[<span class="ident">derive</span>(<span class="ident">Debug</span>)]</span>
-<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">E2EEError</span> {
+<span class="kw">pub</span> <span class="kw">enum</span> <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span> {
     <span class="doccomment">/// Occurs if there was an error while processing the message fanout.</span>
     <span class="ident">Fanout</span>(<span class="ident">FanoutError</span>),
     <span class="doccomment">/// Occurs if a message has invalid signature.</span>
@@ -177,11 +196,13 @@
     <span class="ident">Sign</span>(<span class="ident">RsaError</span>),
     <span class="doccomment">/// May (but should not) occur when converting a variable-length list to a fixed-size array.</span>
     <span class="ident">UnexpectedArraySize</span>,
+    <span class="doccomment">/// Error produced by an [`Impure`].</span>
+    <span class="ident">Impure</span>(<span class="ident">Error</span>),
     <span class="doccomment">/// A custom error.</span>
     <span class="ident">Custom</span>(<span class="ident">String</span>),
 }
 
-<span class="kw">impl</span> <span class="ident">Display</span> <span class="kw">for</span> <span class="ident">E2EEError</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="ident">Display</span> <span class="kw">for</span> <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">fn</span> <span class="ident">fmt</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">f</span>: <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">Formatter</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">fmt</span>::<span class="prelude-ty">Result</span> {
         <span class="kw">match</span> <span class="self">self</span> {
             <span class="ident">E2EEError</span>::<span class="ident">Fanout</span>(<span class="ident">err</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;Bad message fanout: {}&quot;</span>, <span class="ident">err</span>),
@@ -210,30 +231,39 @@
             <span class="ident">E2EEError</span>::<span class="ident">UnexpectedArraySize</span> <span class="op">=</span><span class="op">&gt;</span> {
                 <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;Variable-length list does not have expected length&quot;</span>)
             }
+            <span class="ident">E2EEError</span>::<span class="ident">Impure</span>(<span class="ident">err</span>) <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;An error occured in the impure: {}&quot;</span>, <span class="ident">err</span>)
+            }
             <span class="ident">E2EEError</span>::<span class="ident">Custom</span>(<span class="ident">msg</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;{}&quot;</span>, <span class="ident">msg</span>),
         }
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">FanoutError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> {
+    <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">Error</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
+        <span class="ident">E2EEError</span>::<span class="ident">Impure</span>(<span class="ident">err</span>)
+    }
+}
+
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">FanoutError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">FanoutError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
         <span class="ident">E2EEError</span>::<span class="ident">Fanout</span>(<span class="ident">err</span>)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">DecodeError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">DecodeError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">DecodeError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
         <span class="ident">E2EEError</span>::<span class="ident">ProtobufDecode</span>(<span class="ident">err</span>)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">EncodeError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">EncodeError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">EncodeError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
         <span class="ident">E2EEError</span>::<span class="ident">ProtobufEncode</span>(<span class="ident">err</span>)
     }
 }
 
-<span class="kw">impl</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">PemError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span> {
+<span class="kw">impl</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="ident">From</span><span class="op">&lt;</span><span class="ident">PemError</span><span class="op">&gt;</span> <span class="kw">for</span> <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">Error</span><span class="op">&gt;</span> {
     <span class="kw">fn</span> <span class="ident">from</span>(<span class="ident">err</span>: <span class="ident">PemError</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="self">Self</span> {
         <span class="ident">E2EEError</span>::<span class="ident">PemParse</span>(<span class="ident">err</span>)
     }
