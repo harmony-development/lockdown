@@ -35,6 +35,7 @@ pub struct E2EEClient {
     impure: Box<dyn Impure>,
     stream_states: StreamStates,
     key: RSAPrivateKey,
+    cached_keys: HashMap<u64, RSAPublicKey>,
     uid: u64,
 }
 
@@ -129,6 +130,7 @@ impl E2EEClient {
             impure,
             stream_states: StreamStates::default(),
             key: priv_key,
+            cached_keys: HashMap::new(),
             uid,
         }
     }
@@ -149,6 +151,7 @@ impl E2EEClient {
             impure,
             stream_states: StreamStates::default(),
             key: keypair,
+            cached_keys: HashMap::new(),
             uid,
         })
     }
@@ -329,12 +332,14 @@ impl E2EEClient {
         let mut csprng = OsRng;
 
         let (kind, stream_id) = for_channel;
-        // let's fetch us some state keys
-        let (_, state) = self.stream_states.get_mut(kind, &stream_id).unwrap();
-        let state_key = match kind {
-            StreamKind::Message => &mut state.messages_key,
-            StreamKind::State => &mut state.state_key,
-        };
+
+        let known_users = self
+            .stream_states
+            .get(kind, &stream_id)
+            .unwrap()
+            .1
+            .known_users
+            .clone();
 
         // generate the new key
         let new_key = {
@@ -364,18 +369,13 @@ impl E2EEClient {
                 keys: {
                     let mut map = HashMap::new();
 
-                    for user in &state.known_users {
-                        let pubkey = pubkey_from_pem(
-                            self.impure
-                                .get_public_key_for_user(*user)
-                                .await
-                                .expect("user key"),
-                        )?;
+                    for user in known_users {
+                        let pubkey = self.ensure_has_key(&user).await?;
                         let key_data = pubkey
                             .encrypt(&mut csprng, ENCRYPT_PADDING_SCHEME, &new_key)
                             .map_err(E2EEError::Encrypt)?;
 
-                        map.insert(*user, secret::Key { key_data });
+                        map.insert(user, secret::Key { key_data });
                     }
 
                     map
@@ -383,6 +383,11 @@ impl E2EEClient {
             }),
             from_user: self.uid,
         };
+
+        let state_key = self
+            .stream_states
+            .get_mut_key(kind, &stream_id)
+            .expect("expected key");
 
         let signed_bytes = serialize_message(signed)?;
         let encrypted = state_key.encrypt(signed_bytes);
@@ -421,6 +426,7 @@ impl E2EEClient {
             StreamKind::Message => state.messages_key.decrypt(msg.message),
             StreamKind::State => state.state_key.decrypt(msg.message),
         };
+        let known_users = state.known_users.clone();
 
         let signed_msg: secret::SignedMessage = deser_message(decrypted.as_slice())?;
 
@@ -446,14 +452,14 @@ impl E2EEClient {
         if let Some(fanout) = signed_msg.fanout {
             let keys: &HashMap<u64, secret::Key> = &fanout.keys;
 
-            if keys.len() != state.known_users.len() {
+            if keys.len() != known_users.len() {
                 bail!(FanoutError::LengthNotEqual {
-                    known_users: state.known_users.len(),
+                    known_users: known_users.len(),
                     key_count: keys.len(),
                 })
             }
 
-            for key in &state.known_users {
+            for key in &known_users {
                 // Don't check for senders key, since we trust them already
                 if key != &signed_msg.from_user && !keys.contains_key(key) {
                     bail!(FanoutError::UserIdMissing(*key));
@@ -476,11 +482,23 @@ impl E2EEClient {
                 .set_key(unenc_arr);
         };
 
-        // TODO:
-        // add "ensure has key" method which looks up public keys in a cache, falls back to impure, and then finally errors if it can't find any
-        // verify byte data of signed_msg.message using signed_msg.signature and signed_msg.from_user
-
         Ok((signed_msg.from_user, signed_msg.message))
+    }
+
+    #[allow(clippy::map_entry)]
+    async fn ensure_has_key(&mut self, for_uid: &u64) -> E2EEResult<&RSAPublicKey> {
+        if self.cached_keys.contains_key(for_uid) {
+            Ok(self.cached_keys.get(for_uid).unwrap())
+        } else {
+            let pem = self
+                .impure
+                .get_public_key_for_user(*for_uid)
+                .await
+                .ok_or(E2EEError::Fanout(FanoutError::UserIdMissing(*for_uid)))?;
+            let key = pubkey_from_pem(pem)?;
+            self.cached_keys.insert(*for_uid, key);
+            Ok(self.cached_keys.get(for_uid).unwrap())
+        }
     }
 }
 

@@ -27,7 +27,7 @@ pub enum E2EEError {
     Decrypt(RsaError),
     /// Occurs if signing some data fails.
     Sign(RsaError),
-    /// May occur when converting a variable-length list to a fixed-size array.
+    /// May (but should not) occur when converting a variable-length list to a fixed-size array.
     UnexpectedArraySize,
     /// A custom error.
     Custom(String),
