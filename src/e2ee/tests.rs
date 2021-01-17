@@ -126,6 +126,27 @@ async fn client_creation() {
 }
 
 #[tokio::test]
+#[should_panic(expected = "NoSuchStream")]
+async fn invalid_stream() {
+    init();
+
+    const PASSWORD: &str = "very strong password";
+
+    let server = Arc::new(TestImpureServer::new());
+    let (_, stt_chan) = server.new_channels();
+
+    let (impure, client_id) = TestImpure::new(server);
+    let mut client = E2EEClient::new_with_new_data(Box::new(impure), client_id, PASSWORD.into())
+        .await
+        .unwrap();
+
+    client
+        .encrypt_message(StreamKind::Message, &stt_chan, &[0])
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn exchange_messages() {
     init();
 
