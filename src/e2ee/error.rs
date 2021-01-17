@@ -4,6 +4,8 @@ pub use prost::{DecodeError, EncodeError};
 pub use rsa::errors::Error as RsaError;
 pub use rsa::pem::PemError;
 
+use super::StreamKind;
+
 /// Shorthand for `Result<R, E2EEError>`.
 pub type E2EEResult<R, ImpureError> = Result<R, E2EEError<ImpureError>>;
 
@@ -31,6 +33,8 @@ pub enum E2EEError<Error: ImpureError> {
     Decrypt(RsaError),
     /// Occurs if signing some data fails.
     Sign(RsaError),
+    /// Occurs if a stream couldn't be found.
+    NoSuchStream { kind: StreamKind, id: String },
     /// May (but should not) occur when converting a variable-length list to a fixed-size array.
     UnexpectedArraySize,
     /// Error produced by an [`Impure`].
@@ -63,6 +67,9 @@ impl<Error: ImpureError> Display for E2EEError<Error> {
             }
             E2EEError::Sign(err) => {
                 write!(f, "Failed to sign data: {}", err)
+            }
+            E2EEError::NoSuchStream { id, kind } => {
+                write!(f, "Failed to find {:?} stream with ID {}", kind, id)
             }
             E2EEError::PemParse(err) => write!(f, "Failed to parse PEM: {}", err),
             E2EEError::UnexpectedArraySize => {

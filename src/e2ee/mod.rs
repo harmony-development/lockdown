@@ -332,7 +332,10 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         let known_users = self
             .stream_states
             .get(stream_kind, stream_id.as_ref())
-            .unwrap()
+            .ok_or_else(|| E2EEError::NoSuchStream {
+                kind: stream_kind,
+                id: stream_id.as_ref().to_string(),
+            })?
             .1
             .known_users
             .clone();
@@ -384,7 +387,10 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         let state_key = self
             .stream_states
             .get_mut_key(stream_kind, stream_id.as_ref())
-            .expect("expected key");
+            .ok_or_else(|| E2EEError::NoSuchStream {
+                kind: stream_kind,
+                id: stream_id.as_ref().to_string(),
+            })?;
 
         let signed_bytes = serialize_message(signed)?;
         let encrypted = state_key.encrypt(signed_bytes);
@@ -405,7 +411,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
     /// and its inner Flow.
     pub async fn handle_message(
         &mut self,
-        kind: StreamKind,
+        stream_kind: StreamKind,
         stream_id: impl AsRef<str>,
         data: impl AsRef<[u8]>,
     ) -> E2EEResult<(u64, Vec<u8>), ImpErr> {
@@ -414,12 +420,18 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         log::trace!(
             "Client id: {}\n\nHandling message: stream_kind: {:?} stream_id: {:?}\n {:?}",
             self.uid,
-            kind,
+            stream_kind,
             stream_id.as_ref(),
             self.stream_states
         );
-        let (_, state) = self.stream_states.get(kind, stream_id.as_ref()).unwrap();
-        let decrypted = match kind {
+        let (_, state) = self
+            .stream_states
+            .get(stream_kind, stream_id.as_ref())
+            .ok_or_else(|| E2EEError::NoSuchStream {
+                kind: stream_kind,
+                id: stream_id.as_ref().to_string(),
+            })?;
+        let decrypted = match stream_kind {
             StreamKind::Message => state.messages_key.decrypt(msg.message),
             StreamKind::State => state.state_key.decrypt(msg.message),
         };
@@ -473,8 +485,11 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
                 .map_err(|_| E2EEError::UnexpectedArraySize)?;
 
             self.stream_states
-                .get_mut_key(kind, stream_id.as_ref())
-                .unwrap()
+                .get_mut_key(stream_kind, stream_id.as_ref())
+                .ok_or_else(|| E2EEError::NoSuchStream {
+                    kind: stream_kind,
+                    id: stream_id.as_ref().to_string(),
+                })?
                 .set_key(unenc_arr);
         };
 
