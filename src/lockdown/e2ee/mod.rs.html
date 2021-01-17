@@ -531,15 +531,6 @@
 <span id="528">528</span>
 <span id="529">529</span>
 <span id="530">530</span>
-<span id="531">531</span>
-<span id="532">532</span>
-<span id="533">533</span>
-<span id="534">534</span>
-<span id="535">535</span>
-<span id="536">536</span>
-<span id="537">537</span>
-<span id="538">538</span>
-<span id="539">539</span>
 </pre><div class="example-wrap"><pre class="rust ">
 <span class="kw">use</span> <span class="self">self</span>::<span class="ident">aes</span>::{<span class="ident">HarmonyAes</span>, <span class="ident">KeySize</span>};
 <span class="kw">use</span> <span class="kw">crate</span>::{<span class="ident">api</span>::<span class="ident">secret</span>, <span class="ident">bail</span>};
@@ -570,9 +561,12 @@
 <span class="doccomment">/// Trait used for operations that need networking, which is not handled by this library.</span>
 <span class="attribute">#[<span class="ident">async_trait</span>]</span>
 <span class="kw">pub</span> <span class="kw">trait</span> <span class="ident">Impure</span><span class="op">&lt;</span><span class="ident">Error</span>: <span class="ident">ImpureError</span><span class="op">&gt;</span>: <span class="ident">std</span>::<span class="ident">fmt</span>::<span class="ident">Debug</span> {
+    <span class="doccomment">/// Stores a private key in the server.</span>
     <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">store_private_key</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span>;
+    <span class="doccomment">/// Publishes a public key to the server.</span>
     <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">publish_public_key</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">data</span>: <span class="ident">String</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span>(), <span class="ident">Error</span><span class="op">&gt;</span>;
-    <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">get_public_key_for_user</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">uid</span>: <span class="ident">u64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="prelude-ty">Option</span><span class="op">&lt;</span><span class="ident">String</span><span class="op">&gt;</span>, <span class="ident">Error</span><span class="op">&gt;</span>;
+    <span class="doccomment">/// Gets the public key for a user. It is recommended to implement a cache mechanism for keys.</span>
+    <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">get_public_key_for_user</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">uid</span>: <span class="ident">u64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">String</span>, <span class="ident">Error</span><span class="op">&gt;</span>;
 }
 
 <span class="doccomment">/// E2EE client implementation.</span>
@@ -581,7 +575,6 @@
     <span class="ident">impure</span>: <span class="ident">Box</span><span class="op">&lt;</span><span class="ident">dyn</span> <span class="ident">Impure</span><span class="op">&lt;</span><span class="ident">ImpErr</span><span class="op">&gt;</span><span class="op">&gt;</span>,
     <span class="ident">stream_states</span>: <span class="ident">StreamStates</span>,
     <span class="ident">key</span>: <span class="ident">RSAPrivateKey</span>,
-    <span class="ident">cached_keys</span>: <span class="ident">HashMap</span><span class="op">&lt;</span><span class="ident">u64</span>, <span class="ident">RSAPublicKey</span><span class="op">&gt;</span>,
     <span class="ident">uid</span>: <span class="ident">u64</span>,
 }
 
@@ -678,7 +671,6 @@
             <span class="ident">impure</span>,
             <span class="ident">stream_states</span>: <span class="ident">StreamStates</span>::<span class="ident">default</span>(),
             <span class="ident">key</span>: <span class="ident">priv_key</span>,
-            <span class="ident">cached_keys</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">uid</span>,
         })
     }
@@ -700,7 +692,6 @@
             <span class="ident">impure</span>,
             <span class="ident">stream_states</span>: <span class="ident">StreamStates</span>::<span class="ident">default</span>(),
             <span class="ident">key</span>: <span class="ident">keypair</span>,
-            <span class="ident">cached_keys</span>: <span class="ident">HashMap</span>::<span class="ident">new</span>(),
             <span class="ident">uid</span>,
         })
     }
@@ -778,7 +769,7 @@
     <span class="doccomment">/// Creates a serialized invite for other clients to consume.</span>
     <span class="kw">pub</span> <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">create_invite</span>(
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
-        <span class="ident">messages_id</span>: <span class="ident">String</span>,
+        <span class="ident">messages_id</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>,
         <span class="ident">for_client</span>: <span class="ident">u64</span>,
     ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">ImpErr</span><span class="op">&gt;</span> {
         <span class="ident">log</span>::<span class="macro">trace</span><span class="macro">!</span>(
@@ -787,15 +778,10 @@
         );
         <span class="kw">let</span> (<span class="ident">id</span>, <span class="ident">state</span>) <span class="op">=</span> <span class="self">self</span>
             .<span class="ident">stream_states</span>
-            .<span class="ident">get_mut</span>(<span class="ident">StreamKind</span>::<span class="ident">Message</span>, <span class="kw-2">&amp;</span><span class="ident">messages_id</span>)
+            .<span class="ident">get_mut</span>(<span class="ident">StreamKind</span>::<span class="ident">Message</span>, <span class="ident">messages_id</span>.<span class="ident">as_ref</span>())
             .<span class="ident">unwrap</span>();
 
-        <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="ident">pubkey_from_pem</span>(
-            <span class="self">self</span>.<span class="ident">impure</span>
-                .<span class="ident">get_public_key_for_user</span>(<span class="ident">for_client</span>)
-                .<span class="ident">await</span><span class="question-mark">?</span>
-                .<span class="ident">expect</span>(<span class="string">&quot;expected user key&quot;</span>),
-        )<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="ident">pubkey_from_pem</span>(<span class="self">self</span>.<span class="ident">impure</span>.<span class="ident">get_public_key_for_user</span>(<span class="ident">for_client</span>).<span class="ident">await</span><span class="question-mark">?</span>)<span class="question-mark">?</span>;
 
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">rng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">encrypt_with_pubkey</span> <span class="op">=</span> <span class="op">|</span><span class="ident">data</span>: <span class="kw-2">&amp;</span>[<span class="ident">u8</span>]<span class="op">|</span> {
@@ -871,17 +857,19 @@
     <span class="doccomment">/// Encrypts and signs a message. `message` should always be a Flow in serialised form.</span>
     <span class="kw">pub</span> <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">encrypt_message</span>(
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
-        <span class="ident">for_channel</span>: (<span class="ident">StreamKind</span>, <span class="ident">String</span>),
-        <span class="ident">message</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+        <span class="ident">stream_kind</span>: <span class="ident">StreamKind</span>,
+        <span class="ident">stream_id</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>,
+        <span class="ident">message</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span>,
     ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">ImpErr</span><span class="op">&gt;</span> {
         <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">csprng</span> <span class="op">=</span> <span class="ident">OsRng</span>;
 
-        <span class="kw">let</span> (<span class="ident">kind</span>, <span class="ident">stream_id</span>) <span class="op">=</span> <span class="ident">for_channel</span>;
-
         <span class="kw">let</span> <span class="ident">known_users</span> <span class="op">=</span> <span class="self">self</span>
             .<span class="ident">stream_states</span>
-            .<span class="ident">get</span>(<span class="ident">kind</span>, <span class="kw-2">&amp;</span><span class="ident">stream_id</span>)
-            .<span class="ident">unwrap</span>()
+            .<span class="ident">get</span>(<span class="ident">stream_kind</span>, <span class="ident">stream_id</span>.<span class="ident">as_ref</span>())
+            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">E2EEError</span>::<span class="ident">NoSuchStream</span> {
+                <span class="ident">kind</span>: <span class="ident">stream_kind</span>,
+                <span class="ident">id</span>: <span class="ident">stream_id</span>.<span class="ident">as_ref</span>().<span class="ident">to_string</span>(),
+            })<span class="question-mark">?</span>
             .<span class="number">1</span>
             .<span class="ident">known_users</span>
             .<span class="ident">clone</span>();
@@ -897,7 +885,7 @@
             <span class="ident">key</span>
         };
 
-        <span class="kw">let</span> <span class="ident">hasher</span> <span class="op">=</span> <span class="ident">HmacSha512</span>::<span class="ident">new_varkey</span>(<span class="ident">message</span>.<span class="ident">as_slice</span>()).<span class="ident">expect</span>(<span class="string">&quot;key was invalid size&quot;</span>);
+        <span class="kw">let</span> <span class="ident">hasher</span> <span class="op">=</span> <span class="ident">HmacSha512</span>::<span class="ident">new_varkey</span>(<span class="ident">message</span>.<span class="ident">as_ref</span>()).<span class="ident">expect</span>(<span class="string">&quot;key was invalid size&quot;</span>);
         <span class="kw">let</span> <span class="ident">hashed_message</span> <span class="op">=</span> <span class="ident">hasher</span>.<span class="ident">finalize</span>().<span class="ident">into_bytes</span>();
         <span class="comment">// sign the message data</span>
         <span class="kw">let</span> <span class="ident">signature</span> <span class="op">=</span> <span class="self">self</span>
@@ -907,7 +895,7 @@
 
         <span class="comment">// create the message</span>
         <span class="kw">let</span> <span class="ident">signed</span> <span class="op">=</span> <span class="ident">secret</span>::<span class="ident">SignedMessage</span> {
-            <span class="ident">message</span>,
+            <span class="ident">message</span>: <span class="ident">message</span>.<span class="ident">as_ref</span>().<span class="ident">to_vec</span>(),
             <span class="ident">signature</span>,
             <span class="comment">// create the fanout...</span>
             <span class="ident">fanout</span>: <span class="prelude-val">Some</span>(<span class="ident">secret</span>::<span class="ident">Fanout</span> {
@@ -915,7 +903,8 @@
                     <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">map</span> <span class="op">=</span> <span class="ident">HashMap</span>::<span class="ident">new</span>();
 
                     <span class="kw">for</span> <span class="ident">user</span> <span class="kw">in</span> <span class="ident">known_users</span> {
-                        <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span> <span class="self">self</span>.<span class="ident">ensure_has_key</span>(<span class="kw-2">&amp;</span><span class="ident">user</span>).<span class="ident">await</span><span class="question-mark">?</span>;
+                        <span class="kw">let</span> <span class="ident">pubkey</span> <span class="op">=</span>
+                            <span class="ident">pubkey_from_pem</span>(<span class="self">self</span>.<span class="ident">impure</span>.<span class="ident">get_public_key_for_user</span>(<span class="ident">user</span>).<span class="ident">await</span><span class="question-mark">?</span>)<span class="question-mark">?</span>;
                         <span class="kw">let</span> <span class="ident">key_data</span> <span class="op">=</span> <span class="ident">pubkey</span>
                             .<span class="ident">encrypt</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="ident">csprng</span>, <span class="ident">ENCRYPT_PADDING_SCHEME</span>, <span class="kw-2">&amp;</span><span class="ident">new_key</span>)
                             .<span class="ident">map_err</span>(<span class="ident">E2EEError</span>::<span class="ident">Encrypt</span>)<span class="question-mark">?</span>;
@@ -931,8 +920,11 @@
 
         <span class="kw">let</span> <span class="ident">state_key</span> <span class="op">=</span> <span class="self">self</span>
             .<span class="ident">stream_states</span>
-            .<span class="ident">get_mut_key</span>(<span class="ident">kind</span>, <span class="kw-2">&amp;</span><span class="ident">stream_id</span>)
-            .<span class="ident">expect</span>(<span class="string">&quot;expected key&quot;</span>);
+            .<span class="ident">get_mut_key</span>(<span class="ident">stream_kind</span>, <span class="ident">stream_id</span>.<span class="ident">as_ref</span>())
+            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">E2EEError</span>::<span class="ident">NoSuchStream</span> {
+                <span class="ident">kind</span>: <span class="ident">stream_kind</span>,
+                <span class="ident">id</span>: <span class="ident">stream_id</span>.<span class="ident">as_ref</span>().<span class="ident">to_string</span>(),
+            })<span class="question-mark">?</span>;
 
         <span class="kw">let</span> <span class="ident">signed_bytes</span> <span class="op">=</span> <span class="ident">serialize_message</span>(<span class="ident">signed</span>)<span class="question-mark">?</span>;
         <span class="kw">let</span> <span class="ident">encrypted</span> <span class="op">=</span> <span class="ident">state_key</span>.<span class="ident">encrypt</span>(<span class="ident">signed_bytes</span>);
@@ -953,23 +945,27 @@
     <span class="doccomment">/// and its inner Flow.</span>
     <span class="kw">pub</span> <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">handle_message</span>(
         <span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>,
-        <span class="ident">kind</span>: <span class="ident">StreamKind</span>,
-        <span class="ident">stream_id</span>: <span class="ident">String</span>,
-        <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>,
+        <span class="ident">stream_kind</span>: <span class="ident">StreamKind</span>,
+        <span class="ident">stream_id</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span><span class="ident">str</span><span class="op">&gt;</span>,
+        <span class="ident">data</span>: <span class="kw">impl</span> <span class="ident">AsRef</span><span class="op">&lt;</span>[<span class="ident">u8</span>]<span class="op">&gt;</span>,
     ) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span>(<span class="ident">u64</span>, <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>), <span class="ident">ImpErr</span><span class="op">&gt;</span> {
-        <span class="kw">use</span> <span class="ident">prost</span>::<span class="ident">Message</span>;
-
-        <span class="kw">let</span> <span class="kw-2">mut</span> <span class="ident">msg</span>: <span class="ident">secret</span>::<span class="ident">EncryptedMessage</span> <span class="op">=</span> <span class="ident">Default</span>::<span class="ident">default</span>();
-        <span class="ident">msg</span>.<span class="ident">merge</span>(<span class="ident">data</span>.<span class="ident">as_slice</span>())<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">msg</span>: <span class="ident">secret</span>::<span class="ident">EncryptedMessage</span> <span class="op">=</span> <span class="ident">deser_message</span>(<span class="ident">data</span>.<span class="ident">as_ref</span>())<span class="question-mark">?</span>;
 
         <span class="ident">log</span>::<span class="macro">trace</span><span class="macro">!</span>(
-            <span class="string">&quot;Handling message: stream_kind: {:?} stream_id: {:?}\n {:?}&quot;</span>,
-            <span class="ident">kind</span>,
-            <span class="ident">stream_id</span>,
+            <span class="string">&quot;Client id: {}\n\nHandling message: stream_kind: {:?} stream_id: {:?}\n {:?}&quot;</span>,
+            <span class="self">self</span>.<span class="ident">uid</span>,
+            <span class="ident">stream_kind</span>,
+            <span class="ident">stream_id</span>.<span class="ident">as_ref</span>(),
             <span class="self">self</span>.<span class="ident">stream_states</span>
         );
-        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">state</span>) <span class="op">=</span> <span class="self">self</span>.<span class="ident">stream_states</span>.<span class="ident">get</span>(<span class="ident">kind</span>, <span class="kw-2">&amp;</span><span class="ident">stream_id</span>).<span class="ident">unwrap</span>();
-        <span class="kw">let</span> <span class="ident">decrypted</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">kind</span> {
+        <span class="kw">let</span> (<span class="kw">_</span>, <span class="ident">state</span>) <span class="op">=</span> <span class="self">self</span>
+            .<span class="ident">stream_states</span>
+            .<span class="ident">get</span>(<span class="ident">stream_kind</span>, <span class="ident">stream_id</span>.<span class="ident">as_ref</span>())
+            .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">E2EEError</span>::<span class="ident">NoSuchStream</span> {
+                <span class="ident">kind</span>: <span class="ident">stream_kind</span>,
+                <span class="ident">id</span>: <span class="ident">stream_id</span>.<span class="ident">as_ref</span>().<span class="ident">to_string</span>(),
+            })<span class="question-mark">?</span>;
+        <span class="kw">let</span> <span class="ident">decrypted</span> <span class="op">=</span> <span class="kw">match</span> <span class="ident">stream_kind</span> {
             <span class="ident">StreamKind</span>::<span class="ident">Message</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">state</span>.<span class="ident">messages_key</span>.<span class="ident">decrypt</span>(<span class="ident">msg</span>.<span class="ident">message</span>),
             <span class="ident">StreamKind</span>::<span class="ident">State</span> <span class="op">=</span><span class="op">&gt;</span> <span class="ident">state</span>.<span class="ident">state_key</span>.<span class="ident">decrypt</span>(<span class="ident">msg</span>.<span class="ident">message</span>),
         };
@@ -980,8 +976,7 @@
         <span class="kw">let</span> <span class="ident">sender_pubkey</span> <span class="op">=</span> <span class="ident">pubkey_from_pem</span>(
             <span class="self">self</span>.<span class="ident">impure</span>
                 .<span class="ident">get_public_key_for_user</span>(<span class="ident">signed_msg</span>.<span class="ident">from_user</span>)
-                .<span class="ident">await</span><span class="question-mark">?</span>
-                .<span class="ident">expect</span>(<span class="string">&quot;sender key&quot;</span>),
+                .<span class="ident">await</span><span class="question-mark">?</span>,
         )<span class="question-mark">?</span>;
 
         <span class="comment">// Verify signature</span>
@@ -1024,28 +1019,15 @@
                 .<span class="ident">map_err</span>(<span class="op">|</span><span class="kw">_</span><span class="op">|</span> <span class="ident">E2EEError</span>::<span class="ident">UnexpectedArraySize</span>)<span class="question-mark">?</span>;
 
             <span class="self">self</span>.<span class="ident">stream_states</span>
-                .<span class="ident">get_mut_key</span>(<span class="ident">kind</span>, <span class="kw-2">&amp;</span><span class="ident">stream_id</span>)
-                .<span class="ident">unwrap</span>()
+                .<span class="ident">get_mut_key</span>(<span class="ident">stream_kind</span>, <span class="ident">stream_id</span>.<span class="ident">as_ref</span>())
+                .<span class="ident">ok_or_else</span>(<span class="op">|</span><span class="op">|</span> <span class="ident">E2EEError</span>::<span class="ident">NoSuchStream</span> {
+                    <span class="ident">kind</span>: <span class="ident">stream_kind</span>,
+                    <span class="ident">id</span>: <span class="ident">stream_id</span>.<span class="ident">as_ref</span>().<span class="ident">to_string</span>(),
+                })<span class="question-mark">?</span>
                 .<span class="ident">set_key</span>(<span class="ident">unenc_arr</span>);
         };
 
         <span class="prelude-val">Ok</span>((<span class="ident">signed_msg</span>.<span class="ident">from_user</span>, <span class="ident">signed_msg</span>.<span class="ident">message</span>))
-    }
-
-    <span class="attribute">#[<span class="ident">allow</span>(<span class="ident">clippy</span>::<span class="ident">map_entry</span>)]</span>
-    <span class="ident">async</span> <span class="kw">fn</span> <span class="ident">ensure_has_key</span>(<span class="kw-2">&amp;</span><span class="kw-2">mut</span> <span class="self">self</span>, <span class="ident">for_uid</span>: <span class="kw-2">&amp;</span><span class="ident">u64</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="kw-2">&amp;</span><span class="ident">RSAPublicKey</span>, <span class="ident">ImpErr</span><span class="op">&gt;</span> {
-        <span class="kw">if</span> <span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">contains_key</span>(<span class="ident">for_uid</span>) {
-            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">get</span>(<span class="ident">for_uid</span>).<span class="ident">unwrap</span>())
-        } <span class="kw">else</span> {
-            <span class="kw">let</span> <span class="ident">pem</span> <span class="op">=</span> <span class="self">self</span>
-                .<span class="ident">impure</span>
-                .<span class="ident">get_public_key_for_user</span>(<span class="kw-2">*</span><span class="ident">for_uid</span>)
-                .<span class="ident">await</span><span class="question-mark">?</span>
-                .<span class="ident">ok_or</span>(<span class="ident">E2EEError</span>::<span class="ident">Fanout</span>(<span class="ident">FanoutError</span>::<span class="ident">UserIdMissing</span>(<span class="kw-2">*</span><span class="ident">for_uid</span>)))<span class="question-mark">?</span>;
-            <span class="kw">let</span> <span class="ident">key</span> <span class="op">=</span> <span class="ident">pubkey_from_pem</span>(<span class="ident">pem</span>)<span class="question-mark">?</span>;
-            <span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">insert</span>(<span class="kw-2">*</span><span class="ident">for_uid</span>, <span class="ident">key</span>);
-            <span class="prelude-val">Ok</span>(<span class="self">self</span>.<span class="ident">cached_keys</span>.<span class="ident">get</span>(<span class="ident">for_uid</span>).<span class="ident">unwrap</span>())
-        }
     }
 
     <span class="kw">fn</span> <span class="ident">decrypt_using_privkey</span>(<span class="kw-2">&amp;</span><span class="self">self</span>, <span class="ident">data</span>: <span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>) <span class="op">-</span><span class="op">&gt;</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">Vec</span><span class="op">&lt;</span><span class="ident">u8</span><span class="op">&gt;</span>, <span class="ident">ImpErr</span><span class="op">&gt;</span> {

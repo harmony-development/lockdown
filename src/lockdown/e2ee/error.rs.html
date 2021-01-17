@@ -160,12 +160,21 @@
 <span id="157">157</span>
 <span id="158">158</span>
 <span id="159">159</span>
+<span id="160">160</span>
+<span id="161">161</span>
+<span id="162">162</span>
+<span id="163">163</span>
+<span id="164">164</span>
+<span id="165">165</span>
+<span id="166">166</span>
 </pre><div class="example-wrap"><pre class="rust ">
 <span class="kw">use</span> <span class="ident">std</span>::<span class="ident">fmt</span>::{<span class="self">self</span>, <span class="ident">Display</span>, <span class="ident">Formatter</span>};
 
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">prost</span>::{<span class="ident">DecodeError</span>, <span class="ident">EncodeError</span>};
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">rsa</span>::<span class="ident">errors</span>::<span class="ident">Error</span> <span class="kw">as</span> <span class="ident">RsaError</span>;
 <span class="kw">pub</span> <span class="kw">use</span> <span class="ident">rsa</span>::<span class="ident">pem</span>::<span class="ident">PemError</span>;
+
+<span class="kw">use</span> <span class="kw">super</span>::<span class="ident">StreamKind</span>;
 
 <span class="doccomment">/// Shorthand for `Result&lt;R, E2EEError&gt;`.</span>
 <span class="kw">pub</span> <span class="kw">type</span> <span class="ident">E2EEResult</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">ImpureError</span><span class="op">&gt;</span> <span class="op">=</span> <span class="prelude-ty">Result</span><span class="op">&lt;</span><span class="ident">R</span>, <span class="ident">E2EEError</span><span class="op">&lt;</span><span class="ident">ImpureError</span><span class="op">&gt;</span><span class="op">&gt;</span>;
@@ -194,6 +203,8 @@
     <span class="ident">Decrypt</span>(<span class="ident">RsaError</span>),
     <span class="doccomment">/// Occurs if signing some data fails.</span>
     <span class="ident">Sign</span>(<span class="ident">RsaError</span>),
+    <span class="doccomment">/// Occurs if a stream couldn&#39;t be found.</span>
+    <span class="ident">NoSuchStream</span> { <span class="ident">kind</span>: <span class="ident">StreamKind</span>, <span class="ident">id</span>: <span class="ident">String</span> },
     <span class="doccomment">/// May (but should not) occur when converting a variable-length list to a fixed-size array.</span>
     <span class="ident">UnexpectedArraySize</span>,
     <span class="doccomment">/// Error produced by an [`Impure`].</span>
@@ -226,6 +237,9 @@
             }
             <span class="ident">E2EEError</span>::<span class="ident">Sign</span>(<span class="ident">err</span>) <span class="op">=</span><span class="op">&gt;</span> {
                 <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;Failed to sign data: {}&quot;</span>, <span class="ident">err</span>)
+            }
+            <span class="ident">E2EEError</span>::<span class="ident">NoSuchStream</span> { <span class="ident">id</span>, <span class="ident">kind</span> } <span class="op">=</span><span class="op">&gt;</span> {
+                <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;Failed to find {:?} stream with ID {}&quot;</span>, <span class="ident">kind</span>, <span class="ident">id</span>)
             }
             <span class="ident">E2EEError</span>::<span class="ident">PemParse</span>(<span class="ident">err</span>) <span class="op">=</span><span class="op">&gt;</span> <span class="macro">write</span><span class="macro">!</span>(<span class="ident">f</span>, <span class="string">&quot;Failed to parse PEM: {}&quot;</span>, <span class="ident">err</span>),
             <span class="ident">E2EEError</span>::<span class="ident">UnexpectedArraySize</span> <span class="op">=</span><span class="op">&gt;</span> {
