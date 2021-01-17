@@ -318,6 +318,49 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
         Ok(())
     }
 
+    pub fn handle_trust_key(&mut self, state_id: &str, trust_key: &[u8]) -> E2EEResult<(), ImpErr> {
+        log::trace!(
+            "Client id {}\n\nHandling trust key: Stream states before:\n{:?}",
+            self.uid,
+            self.stream_states
+        );
+
+        let (_, state) = self
+            .stream_states
+            .get_mut(StreamKind::State, state_id)
+            .unwrap();
+
+        let secret::TrustKey { for_user, key: _ } = deser_message(trust_key)?;
+
+        if self.uid == for_user || state.known_users.contains(&for_user) {
+            // Already trust self
+            return Ok(());
+        }
+
+        state.known_users.push(for_user);
+        log::trace!(
+            "Client id {}\n\nHandling trust key: Stream states after:\n{:?}",
+            self.uid,
+            self.stream_states
+        );
+
+        Ok(())
+    }
+
+    /// Returns a serialized trust key.
+    pub async fn create_trust_key(&mut self, for_user: u64) -> E2EEResult<Vec<u8>, ImpErr> {
+        let pubkey = self.impure.get_public_key_for_user(for_user).await?;
+
+        let trust_key = serialize_message(secret::TrustKey {
+            for_user,
+            key: Some(secret::Key {
+                key_data: pubkey.into_bytes(),
+            }),
+        })?;
+
+        Ok(trust_key)
+    }
+
     /// Encrypts and signs a message. `message` should always be a Flow in serialised form.
     pub async fn encrypt_message(
         &mut self,

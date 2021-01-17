@@ -125,6 +125,121 @@ async fn client_creation() {
         .unwrap();
 }
 
+#[allow(clippy::await_holding_lock)]
+#[tokio::test]
+async fn many_clients() {
+    const CLIENTS_SIZE: usize = 10;
+
+    init();
+
+    let server = Arc::new(TestImpureServer::new());
+    let (msg_chan, stt_chan) = server.new_channels();
+
+    let mut impures = Vec::with_capacity(CLIENTS_SIZE);
+    for _ in 0..CLIENTS_SIZE {
+        impures.push(TestImpure::new(server.clone()));
+    }
+
+    let rng = rand::thread_rng();
+    let mut clients = Vec::with_capacity(CLIENTS_SIZE);
+    for (impure, id) in impures {
+        let new_client = E2EEClient::new_with_new_data(
+            Box::new(impure),
+            id,
+            rng.sample_iter(rand::distributions::Alphanumeric)
+                .take(30)
+                .map(char::from)
+                .collect(),
+        )
+        .await
+        .expect("failed");
+
+        clients.push((new_client, id));
+    }
+
+    clients[0]
+        .0
+        .prepare_channel_keys(msg_chan.clone(), stt_chan.clone());
+    for i in 1..CLIENTS_SIZE {
+        let for_user = clients[i].1;
+        let trust_key = clients[0].0.create_trust_key(for_user).await.expect("err");
+        // put trust key event into state stream
+        server
+            .channels
+            .lock()
+            .expect("mutex poisoned")
+            .get_mut(&stt_chan)
+            .expect("no state chan")
+            .push(trust_key);
+        let invite = clients[0]
+            .0
+            .create_invite(msg_chan.clone(), for_user)
+            .await
+            .expect("err");
+        clients[i].0.handle_invite(invite).expect("err");
+    }
+
+    let chans = server.channels.lock().expect("aaa");
+    let trust_keys = chans.get(&stt_chan).expect("no state chan");
+    for (client, _) in clients.iter_mut().skip(1) {
+        for trust_key in trust_keys {
+            client.handle_trust_key(&stt_chan, trust_key).expect("err");
+        }
+    }
+
+    let test_data = serialize_message(secret::Flow {
+        content: Some(secret::flow::Content::Message(secret::Message {
+            kind: Some(secret::message::Kind::Sent(secret::SentMessage {
+                contents: "hi!".into(),
+            })),
+        })),
+        ..Default::default()
+    })
+    .expect("failure serializing message");
+    let test_data_enc = clients[0]
+        .0
+        .encrypt_message(StreamKind::Message, &msg_chan, &test_data)
+        .await
+        .expect("err");
+
+    for i in 1..CLIENTS_SIZE {
+        let (id, msg) = clients[i]
+            .0
+            .handle_message(StreamKind::Message, &msg_chan, &test_data_enc)
+            .await
+            .expect("err");
+        assert_eq!(id, clients[0].1);
+        assert_eq!(msg, test_data);
+
+        /*let reply_data = serialize_message(secret::Flow {
+            content: Some(secret::flow::Content::Message(secret::Message {
+                kind: Some(secret::message::Kind::Sent(secret::SentMessage {
+                    contents: rng
+                        .sample_iter(rand::distributions::Alphanumeric)
+                        .take(30)
+                        .map(char::from)
+                        .collect::<String>(),
+                })),
+            })),
+            ..Default::default()
+        })
+        .expect("failure serializing message");
+        let reply_data_enc = clients[i]
+            .0
+            .encrypt_message(StreamKind::Message, &msg_chan, reply_data.as_slice())
+            .await
+            .expect("err");
+
+        let (rid, rmsg) = clients[0]
+            .0
+            .handle_message(StreamKind::Message, &msg_chan, &reply_data_enc)
+            .await
+            .expect("aaa");
+        assert_eq!(rid, clients[i].1);
+        assert_eq!(rmsg, reply_data);*/
+    }
+}
+
 #[tokio::test]
 #[should_panic(expected = "NoSuchStream")]
 async fn invalid_stream() {
