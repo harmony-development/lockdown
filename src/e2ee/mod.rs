@@ -17,6 +17,8 @@ pub mod aes;
 /// Error types used in this library.
 pub mod error;
 
+pub mod megolm;
+
 type HmacSha512 = Hmac<Sha3_512>;
 
 const ENCRYPT_PADDING_SCHEME: PaddingScheme = PaddingScheme::PKCS1v15Encrypt;
