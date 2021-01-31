@@ -10,6 +10,7 @@ use hmac::{Hmac, Mac, NewMac};
 use sha3::Sha3_256;
 type HmacSha256 = Hmac<Sha3_256>;
 
+#[derive(Debug, Clone, Copy)]
 pub struct MegOlm {
     data: [[u8; PART_LENGTH]; PART_COUNT],
     counter: u32
@@ -61,6 +62,35 @@ impl MegOlm {
     }
     pub fn counter(&self) -> u32 {
         self.counter
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Keyinator {
+    from: MegOlm,
+    now: MegOlm
+}
+
+impl Keyinator {
+    pub fn new(olm: MegOlm) -> Self {
+        Keyinator {
+            from: olm,
+            now: olm
+        }
+    }
+    pub fn key_at(&mut self, i: u32) -> [u8; 128] {
+        if i < self.now.counter() {
+            let cpy = self.from;
+            cpy.advance_to(i);
+            cpy.key()
+        } else {
+            self.now.advance_to(i);
+
+            self.now.key()
+        }
+    }
+    pub fn counter(&mut self) -> u32 {
+        self.now.counter()
     }
 }
 
