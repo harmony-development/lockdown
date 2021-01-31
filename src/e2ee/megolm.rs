@@ -55,35 +55,6 @@ impl MegOlm {
         while self.counter != to {
             self.advance()
         }
-
-        // TODO: debug why this optimised implementation isn't working
-        //
-        // for j in 0..PART_COUNT {
-        //     let shift = (PART_COUNT - j - 1) * 8;
-        //     let mask: u32 = (!0) << shift;
-
-        //     let mut steps =
-        //         ((to >> shift) - (self.counter >> shift)) & 0xff;
-
-        //     if steps == 0 {
-        //         if to < self.counter {
-        //             steps = 0x100;
-        //         } else {
-        //             continue
-        //         }
-        //     }
-
-        //     while steps > 1 {
-        //         rehash_part(&mut self.data, j, j);
-        //         steps -= 1;
-        //     }
-
-        //     for k in 3..j {
-        //         rehash_part(&mut self.data, j, k);
-        //     }
-
-        //     self.counter = to & mask;
-        // }
     }
     pub fn key(&self) -> [u8; 128] {
         unsafe { std::mem::transmute_copy(&self.data) }
