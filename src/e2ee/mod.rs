@@ -364,7 +364,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
             message: message.as_ref().to_vec(),
             signature,
             // create the fanout...
-            fanout: Some(secret::Fanout {
+            /*fanout: Some(secret::Fanout {
                 keys: {
                     let mut map = HashMap::new();
 
@@ -380,7 +380,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
 
                     map
                 },
-            }),
+            }),*/
             from_user: self.uid,
         };
 
@@ -457,7 +457,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
             bail!(E2EEError::InvalidSignature(err));
         }
 
-        if let Some(fanout) = signed_msg.fanout {
+        /*if let Some(fanout) = signed_msg.fanout {
             let keys: &HashMap<u64, secret::Key> = &fanout.keys;
 
             if keys.len() != known_users.len() {
@@ -491,7 +491,7 @@ impl<ImpErr: ImpureError> E2EEClient<ImpErr> {
                     id: stream_id.as_ref().to_string(),
                 })?
                 .set_key(unenc_arr);
-        };
+        };*/
 
         Ok((signed_msg.from_user, signed_msg.message))
     }
